@@ -1,9 +1,13 @@
+use crate::arch::pit;
 use crate::drivers::e1000;
 use crate::graphics::canvas::{draw_rect_outline, draw_text, draw_text_clipped, fill_rect};
 use crate::graphics::framebuffer::Color;
 use crate::graphics::icons::{draw_icon, AppIcon};
 use crate::gui::window::Window;
-use crate::net::stack::{connect_host_wifi, disconnect_host_wifi, get_info, query_host_wifi_bridge};
+use crate::net::stack::{
+    cancel_host_wifi_command, check_host_wifi_response, get_info, start_host_wifi_command,
+    SocketHandle,
+};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -20,19 +24,55 @@ pub struct WifiNetwork {
     pub is_connected: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WifiOpState {
+    Idle,
+    Scanning {
+        handle: SocketHandle,
+        start_ms: u64,
+        anim_frame: u8,
+    },
+    Connecting {
+        handle: SocketHandle,
+        start_ms: u64,
+        anim_frame: u8,
+    },
+    Disconnecting {
+        handle: SocketHandle,
+        start_ms: u64,
+    },
+}
+
 pub struct NetworkManagerApp {
     pub active_tab: usize, // 0 = Ethernet, 1 = Wi-Fi (Host Bridge)
     pub wifi_networks: Vec<WifiNetwork>,
     pub selected_wifi_idx: Option<usize>,
-    pub scanning: bool,
     pub status_msg: String,
     pub password_input: String,
     pub password_active: bool,
-    pub connecting: bool,
     pub connected_ssid: String,
+    pub connecting_target_ssid: String,
+    pub op_state: WifiOpState,
+    pub last_update_ms: u64,
 }
 
 pub static NETWORK_MANAGER: Mutex<NetworkManagerApp> = Mutex::new(NetworkManagerApp::new());
+
+pub fn get_wifi_tray_status() -> (bool, String, u8) {
+    if let Some(mgr) = NETWORK_MANAGER.try_lock() {
+        let is_connected = !mgr.connected_ssid.is_empty();
+        let ssid = mgr.connected_ssid.clone();
+        let sig = mgr
+            .wifi_networks
+            .iter()
+            .find(|n| n.ssid == mgr.connected_ssid)
+            .map(|n| n.signal_percent)
+            .unwrap_or(85);
+        (is_connected, ssid, sig)
+    } else {
+        (false, String::new(), 0)
+    }
+}
 
 impl NetworkManagerApp {
     pub const fn new() -> Self {
@@ -40,33 +80,38 @@ impl NetworkManagerApp {
             active_tab: 0,
             wifi_networks: Vec::new(),
             selected_wifi_idx: None,
-            scanning: false,
             status_msg: String::new(),
             password_input: String::new(),
             password_active: false,
-            connecting: false,
             connected_ssid: String::new(),
+            connecting_target_ssid: String::new(),
+            op_state: WifiOpState::Idle,
+            last_update_ms: 0,
         }
     }
 
-    pub fn scan_wifi(&mut self) {
-        self.scanning = true;
-        self.status_msg = "Querying Windows Wi-Fi Bridge on host (10.0.2.2:18888)...".to_string();
+    pub fn is_scanning(&self) -> bool {
+        matches!(self.op_state, WifiOpState::Scanning { .. })
+    }
 
-        match query_host_wifi_bridge() {
-            Ok(response) => {
-                self.parse_wifi_response(&response);
-                self.status_msg = format!(
-                    "Discovered {} physical Wi-Fi network(s) from Windows host",
-                    self.wifi_networks.len()
-                );
-                let mut desktop = crate::gui::desktop::DESKTOP.lock();
-                desktop.wifi_bridge_connected = true;
-                if let Some(conn) = self.wifi_networks.iter().find(|n| n.is_connected) {
-                    desktop.current_wifi_ssid = conn.ssid.clone();
-                    desktop.wifi_signal = conn.signal_percent;
-                    self.connected_ssid = conn.ssid.clone();
-                }
+    pub fn is_connecting(&self) -> bool {
+        matches!(self.op_state, WifiOpState::Connecting { .. })
+    }
+
+    pub fn scan_wifi(&mut self) {
+        if self.op_state != WifiOpState::Idle {
+            return;
+        }
+
+        match start_host_wifi_command("SCAN") {
+            Ok(handle) => {
+                self.op_state = WifiOpState::Scanning {
+                    handle,
+                    start_ms: pit::uptime_ms(),
+                    anim_frame: 0,
+                };
+                self.status_msg =
+                    "Scanning real physical Wi-Fi networks via Windows host... [/]".to_string();
             }
             Err(err) => {
                 self.status_msg = format!("Host Wi-Fi Bridge: {}", err);
@@ -82,10 +127,13 @@ impl NetworkManagerApp {
                 }
             }
         }
-        self.scanning = false;
     }
 
     pub fn connect_selected(&mut self) {
+        if self.op_state != WifiOpState::Idle {
+            return;
+        }
+
         let idx = match self.selected_wifi_idx {
             Some(i) if i < self.wifi_networks.len() => i,
             _ => {
@@ -100,40 +148,36 @@ impl NetworkManagerApp {
             return;
         }
 
-        self.connecting = true;
-        self.status_msg = format!("Connecting to '{}' via Windows WLAN API...", target_ssid);
-
-        match connect_host_wifi(&target_ssid, &self.password_input) {
-            Ok(resp) => {
-                self.status_msg = resp.clone();
-                if resp.starts_with("SUCCESS") {
-                    for (i, net) in self.wifi_networks.iter_mut().enumerate() {
-                        net.is_connected = i == idx;
-                    }
-                    self.connected_ssid = target_ssid.clone();
-                    let mut desktop = crate::gui::desktop::DESKTOP.lock();
-                    desktop.wifi_bridge_connected = true;
-                    desktop.current_wifi_ssid = target_ssid;
-                }
+        let cmd = format!("CONNECT {}|{}", target_ssid, self.password_input);
+        match start_host_wifi_command(&cmd) {
+            Ok(handle) => {
+                self.connecting_target_ssid = target_ssid.clone();
+                self.op_state = WifiOpState::Connecting {
+                    handle,
+                    start_ms: pit::uptime_ms(),
+                    anim_frame: 0,
+                };
+                self.status_msg =
+                    format!("Connecting to '{}' via Windows WLAN API... [/]", target_ssid);
             }
             Err(err) => {
                 self.status_msg = format!("Connection error: {}", err);
             }
         }
-        self.connecting = false;
     }
 
     pub fn disconnect_selected(&mut self) {
-        self.status_msg = "Disconnecting via Windows WLAN API...".to_string();
-        match disconnect_host_wifi() {
-            Ok(resp) => {
-                self.status_msg = resp;
-                for net in self.wifi_networks.iter_mut() {
-                    net.is_connected = false;
-                }
-                self.connected_ssid.clear();
-                let mut desktop = crate::gui::desktop::DESKTOP.lock();
-                desktop.current_wifi_ssid.clear();
+        if self.op_state != WifiOpState::Idle {
+            return;
+        }
+
+        match start_host_wifi_command("DISCONNECT") {
+            Ok(handle) => {
+                self.op_state = WifiOpState::Disconnecting {
+                    handle,
+                    start_ms: pit::uptime_ms(),
+                };
+                self.status_msg = "Disconnecting via Windows WLAN API...".to_string();
             }
             Err(err) => {
                 self.status_msg = format!("Disconnect error: {}", err);
@@ -141,7 +185,150 @@ impl NetworkManagerApp {
         }
     }
 
+    pub fn update(&mut self) {
+        let now_ms = pit::uptime_ms();
+        if now_ms - self.last_update_ms < 30 {
+            return;
+        }
+        self.last_update_ms = now_ms;
+
+        match self.op_state {
+            WifiOpState::Idle => {}
+            WifiOpState::Scanning {
+                handle,
+                start_ms,
+                ref mut anim_frame,
+            } => match check_host_wifi_response(handle) {
+                Ok(Some(response)) => {
+                    self.op_state = WifiOpState::Idle;
+                    self.parse_wifi_response(&response);
+                    self.status_msg = format!(
+                        "Discovered {} physical Wi-Fi network(s) from Windows host",
+                        self.wifi_networks.len()
+                    );
+                    if let Some(conn) = self.wifi_networks.iter().find(|n| n.is_connected) {
+                        self.connected_ssid = conn.ssid.clone();
+                    }
+                }
+                Ok(None) => {
+                    if now_ms - start_ms > 4000 {
+                        cancel_host_wifi_command(handle);
+                        self.op_state = WifiOpState::Idle;
+                        self.status_msg = "Scan timeout: Windows Wi-Fi Bridge did not respond. Check START_WIFI_HELPER.".to_string();
+                        if self.wifi_networks.is_empty() {
+                            self.wifi_networks.push(WifiNetwork {
+                                ssid: "HostBridge_Waiting".to_string(),
+                                signal_percent: 0,
+                                security: "Launch START_WIFI_HELPER on Windows host".to_string(),
+                                band: "2.4 GHz".to_string(),
+                                channel: "-".to_string(),
+                                is_connected: false,
+                            });
+                        }
+                    } else {
+                        *anim_frame = (*anim_frame + 1) % 4;
+                        let spinner = match *anim_frame {
+                            0 => "[|]",
+                            1 => "[/]",
+                            2 => "[-]",
+                            _ => "[\\]",
+                        };
+                        self.status_msg = format!(
+                            "Scanning physical Wi-Fi networks via Windows host {} ...",
+                            spinner
+                        );
+                    }
+                }
+                Err(err) => {
+                    cancel_host_wifi_command(handle);
+                    self.op_state = WifiOpState::Idle;
+                    self.status_msg = format!("Host Wi-Fi Bridge error: {}", err);
+                }
+            },
+            WifiOpState::Connecting {
+                handle,
+                start_ms,
+                ref mut anim_frame,
+            } => match check_host_wifi_response(handle) {
+                Ok(Some(response)) => {
+                    self.op_state = WifiOpState::Idle;
+                    self.status_msg = response.clone();
+                    if response.starts_with("SUCCESS") {
+                        let target = self.connecting_target_ssid.clone();
+                        for net in self.wifi_networks.iter_mut() {
+                            net.is_connected = net.ssid == target;
+                        }
+                        self.connected_ssid = target;
+                        self.password_input.clear();
+                        self.password_active = false;
+                    }
+                }
+                Ok(None) => {
+                    if now_ms - start_ms > 7500 {
+                        cancel_host_wifi_command(handle);
+                        self.op_state = WifiOpState::Idle;
+                        self.status_msg = format!(
+                            "Connection to '{}' timed out. Check password or signal.",
+                            self.connecting_target_ssid
+                        );
+                    } else {
+                        *anim_frame = (*anim_frame + 1) % 4;
+                        let spinner = match *anim_frame {
+                            0 => "[|]",
+                            1 => "[/]",
+                            2 => "[-]",
+                            _ => "[\\]",
+                        };
+                        self.status_msg = format!(
+                            "Connecting to '{}' via Windows WLAN API {} ...",
+                            self.connecting_target_ssid, spinner
+                        );
+                    }
+                }
+                Err(err) => {
+                    cancel_host_wifi_command(handle);
+                    self.op_state = WifiOpState::Idle;
+                    self.status_msg = format!("Connection error: {}", err);
+                }
+            },
+            WifiOpState::Disconnecting { handle, start_ms } => {
+                match check_host_wifi_response(handle) {
+                    Ok(Some(response)) => {
+                        self.op_state = WifiOpState::Idle;
+                        self.status_msg = response;
+                        for net in self.wifi_networks.iter_mut() {
+                            net.is_connected = false;
+                        }
+                        self.connected_ssid.clear();
+                    }
+                    Ok(None) => {
+                        if now_ms - start_ms > 3500 {
+                            cancel_host_wifi_command(handle);
+                            self.op_state = WifiOpState::Idle;
+                            self.status_msg = "Disconnected from Wi-Fi".to_string();
+                            self.connected_ssid.clear();
+                            for net in self.wifi_networks.iter_mut() {
+                                net.is_connected = false;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        cancel_host_wifi_command(handle);
+                        self.op_state = WifiOpState::Idle;
+                        self.status_msg = format!("Disconnect error: {}", err);
+                    }
+                }
+            }
+        }
+    }
+
     fn parse_wifi_response(&mut self, data: &str) {
+        if data.trim().starts_with("NO_NETWORKS") {
+            self.wifi_networks.clear();
+            self.status_msg = "No physical Wi-Fi networks found by Windows adapter.".to_string();
+            return;
+        }
+
         // Format from Windows host bridge:
         // SSID|SIGNAL%|SECURITY|BAND|CHANNEL|CONNECTED
         // or fallback: SSID|SIGNAL%|SECURITY|CONNECTED
@@ -166,14 +353,18 @@ impl NetworkManagerApp {
                 };
 
                 if !ssid.is_empty() {
+                    let is_conn = is_connected;
                     self.wifi_networks.push(WifiNetwork {
-                        ssid,
+                        ssid: ssid.clone(),
                         signal_percent: signal,
                         security,
                         band,
                         channel,
-                        is_connected,
+                        is_connected: is_conn,
                     });
+                    if is_conn {
+                        self.connected_ssid = ssid;
+                    }
                 }
             }
         }
@@ -278,37 +469,37 @@ impl NetworkManagerApp {
 
         // 2. Wi-Fi tab action buttons
         if self.active_tab == 1 {
-            // "Scan Now" button: (10..95, 36..60)
-            if local_x >= 10 && local_x <= 95 && local_y >= 36 && local_y <= 60 {
+            // "Scan Now" button: (10..95, 38..64)
+            if local_x >= 10 && local_x <= 95 && local_y >= 38 && local_y <= 64 {
                 self.scan_wifi();
                 return;
             }
 
-            // "Connect" button: (410..480, 275..302)
-            if local_x >= 410 && local_x <= 480 && local_y >= 275 && local_y <= 305 {
+            // "Connect" button: (325..405, 286..316)
+            if local_x >= 325 && local_x <= 405 && local_y >= 286 && local_y <= 316 {
                 self.connect_selected();
                 return;
             }
 
-            // "Disconnect" button: (488..570, 275..302)
-            if local_x >= 488 && local_x <= 570 && local_y >= 275 && local_y <= 305 {
+            // "Disconnect" button: (415..510, 286..316)
+            if local_x >= 415 && local_x <= 510 && local_y >= 286 && local_y <= 316 {
                 self.disconnect_selected();
                 return;
             }
 
-            // Password input box: (160..395, 278..302)
-            if local_x >= 160 && local_x <= 395 && local_y >= 275 && local_y <= 305 {
+            // Password input box: (90..315, 286..316)
+            if local_x >= 90 && local_x <= 315 && local_y >= 286 && local_y <= 316 {
                 self.password_active = true;
                 return;
-            } else {
+            } else if local_y >= 286 && local_y <= 316 {
                 self.password_active = false;
             }
 
-            // Wi-Fi list items: (10..bw, 90..)
-            let list_y = local_y - 90;
-            let item_h = 30;
-            if list_y >= 0 && list_y < 180 {
-                let idx = (list_y / item_h) as usize;
+            // Wi-Fi list items: starting at row_y = 92, 28px per row
+            let item_start_y = 92;
+            let row_h = 28;
+            if local_y >= item_start_y {
+                let idx = ((local_y - item_start_y) / row_h) as usize;
                 if idx < self.wifi_networks.len() {
                     self.selected_wifi_idx = Some(idx);
                     let net = &self.wifi_networks[idx];
@@ -316,6 +507,7 @@ impl NetworkManagerApp {
                         "Selected: '{}' (Signal: {}%, Band: {}, Security: {})",
                         net.ssid, net.signal_percent, net.band, net.security
                     );
+                    self.password_active = false;
                 }
             }
         }
@@ -443,8 +635,15 @@ impl NetworkManagerApp {
             );
         } else {
             // WI-FI HOST BRIDGE TAB
-            fill_rect(bx + 10, content_y + 4, 85, 24, Color::rgb(16, 185, 129));
-            draw_text(bx + 18, content_y + 8, "Scan Now", Color::rgb(255, 255, 255), None);
+            let scan_btn_color = if self.is_scanning() {
+                Color::rgb(245, 158, 11) // Amber
+            } else {
+                Color::rgb(16, 185, 129) // Emerald
+            };
+            let scan_btn_text = if self.is_scanning() { "Scanning..." } else { "Scan Now" };
+            fill_rect(bx + 10, content_y + 4, 85, 24, scan_btn_color);
+            let scan_text_x = if self.is_scanning() { bx + 12 } else { bx + 18 };
+            draw_text(scan_text_x, content_y + 8, scan_btn_text, Color::rgb(255, 255, 255), None);
 
             draw_text(
                 bx + 110,
@@ -559,8 +758,15 @@ impl NetworkManagerApp {
             );
 
             // Connect button
-            fill_rect(bx + 325, conn_y + 20, 80, 24, Color::rgb(16, 185, 129));
-            draw_text(bx + 342, conn_y + 24, "Connect", Color::rgb(255, 255, 255), None);
+            let conn_btn_color = if self.is_connecting() {
+                Color::rgb(245, 158, 11)
+            } else {
+                Color::rgb(16, 185, 129)
+            };
+            let conn_btn_text = if self.is_connecting() { "Connecting..." } else { "Connect" };
+            fill_rect(bx + 325, conn_y + 20, 80, 24, conn_btn_color);
+            let conn_text_x = if self.is_connecting() { bx + 328 } else { bx + 342 };
+            draw_text(conn_text_x, conn_y + 24, conn_btn_text, Color::rgb(255, 255, 255), None);
 
             // Disconnect button
             fill_rect(bx + 415, conn_y + 20, 95, 24, Color::rgb(239, 68, 68));

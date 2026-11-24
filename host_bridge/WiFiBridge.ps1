@@ -25,7 +25,7 @@ Write-Host "  Ready to serve Wi-Fi scan and status requests from Life OS" -Foreg
 Write-Host "  Press Ctrl+C to exit.`n" -ForegroundColor Gray
 
 function Get-RealWiFiNetworks {
-    $networks = @()
+    $networksDict = @{}
     $currentSsid = ""
 
     try {
@@ -39,54 +39,63 @@ function Get-RealWiFiNetworks {
 
         # Scan nearby networks
         $scanOutput = netsh wlan show networks mode=bssid
-        $currentName = ""
-        $currentAuth = "WPA2-Personal"
-        $currentSignal = 80
-        $currentBand = "2.4 GHz"
-        $currentChannel = "6"
+        $currSsid = ""
+        $currAuth = "WPA2-Personal"
+        $currSignal = 75
+        $currBand = "2.4 GHz"
+        $currChannel = "6"
 
         foreach ($line in $scanOutput) {
-            if ($line -match "^\s*SSID\s+\d+\s*:\s*(.+)$") {
-                if ($currentName -ne "") {
-                    $isConnected = ($currentName -eq $currentSsid)
-                    $networks += [PSCustomObject]@{
-                        SSID = $currentName
-                        Signal = $currentSignal
-                        Security = $currentAuth
-                        Band = $currentBand
-                        Channel = $currentChannel
-                        Connected = $isConnected
+            if ($line -match "^\s*SSID\s+\d+\s*:\s*(.*)$") {
+                # Commit previous network if present
+                if ($currSsid -ne "") {
+                    $isConnected = ($currSsid -eq $currentSsid)
+                    if (-not $networksDict.ContainsKey($currSsid) -or $networksDict[$currSsid].Signal -lt $currSignal) {
+                        $networksDict[$currSsid] = [PSCustomObject]@{
+                            SSID = $currSsid
+                            Signal = $currSignal
+                            Security = $currAuth
+                            Band = $currBand
+                            Channel = $currChannel
+                            Connected = $isConnected
+                        }
                     }
                 }
-                $currentName = $matches[1].Trim()
-                $currentAuth = "WPA2-Personal"
-                $currentSignal = 80
-                $currentBand = "2.4 GHz"
-                $currentChannel = "6"
+
+                $rawName = $matches[1].Trim()
+                $currSsid = if ([string]::IsNullOrWhiteSpace($rawName)) { "[Hidden Network]" } else { $rawName }
+                $currAuth = "WPA2-Personal"
+                $currSignal = 75
+                $currBand = "2.4 GHz"
+                $currChannel = "6"
             }
             elseif ($line -match "^\s*Authentication\s*:\s*(.+)$") {
-                $currentAuth = $matches[1].Trim()
+                $currAuth = $matches[1].Trim()
             }
             elseif ($line -match "^\s*Signal\s*:\s*(\d+)%") {
-                $currentSignal = [int]$matches[1].Trim()
+                $sig = [int]$matches[1].Trim()
+                if ($sig -gt $currSignal) { $currSignal = $sig }
             }
             elseif ($line -match "^\s*Band\s*:\s*(.+)$") {
-                $currentBand = $matches[1].Trim()
+                $currBand = $matches[1].Trim()
             }
             elseif ($line -match "^\s*Channel\s*:\s*(\d+)") {
-                $currentChannel = $matches[1].Trim()
+                $currChannel = $matches[1].Trim()
             }
         }
 
-        if ($currentName -ne "") {
-            $isConnected = ($currentName -eq $currentSsid)
-            $networks += [PSCustomObject]@{
-                SSID = $currentName
-                Signal = $currentSignal
-                Security = $currentAuth
-                Band = $currentBand
-                Channel = $currentChannel
-                Connected = $isConnected
+        # Commit final network
+        if ($currSsid -ne "") {
+            $isConnected = ($currSsid -eq $currentSsid)
+            if (-not $networksDict.ContainsKey($currSsid) -or $networksDict[$currSsid].Signal -lt $currSignal) {
+                $networksDict[$currSsid] = [PSCustomObject]@{
+                    SSID = $currSsid
+                    Signal = $currSignal
+                    Security = $currAuth
+                    Band = $currBand
+                    Channel = $currChannel
+                    Connected = $isConnected
+                }
             }
         }
     }
@@ -94,7 +103,9 @@ function Get-RealWiFiNetworks {
         Write-Warning "Failed to query netsh wlan: $_"
     }
 
-    return $networks
+    # Sort so connected network is first, then by signal descending
+    $networks = $networksDict.Values | Sort-Object -Property @{Expression="Connected"; Descending=$true}, @{Expression="Signal"; Descending=$true}
+    return @($networks)
 }
 
 try {
@@ -113,15 +124,19 @@ try {
 
         if ($request -eq "SCAN" -or $request -eq "WIFI_SCAN") {
             $nets = Get-RealWiFiNetworks
-            $responseLines = @()
-            foreach ($n in $nets) {
-                $connStr = if ($n.Connected) { "1" } else { "0" }
-                $responseLines += "$($n.SSID)|$($n.Signal)|$($n.Security)|$($n.Band)|$($n.Channel)|$connStr"
+            if ($nets.Count -eq 0) {
+                $response = "NO_NETWORKS|0|No Wi-Fi networks found by host adapter|2.4 GHz|1|0"
+            } else {
+                $responseLines = @()
+                foreach ($n in $nets) {
+                    $connStr = if ($n.Connected) { "1" } else { "0" }
+                    $responseLines += "$($n.SSID)|$($n.Signal)|$($n.Security)|$($n.Band)|$($n.Channel)|$connStr"
+                }
+                $response = $responseLines -join "`n"
             }
-            $response = $responseLines -join "`n"
             $replyBytes = [System.Text.Encoding]::UTF8.GetBytes($response)
             $UdpClient.Send($replyBytes, $replyBytes.Length, $sender) | Out-Null
-            Write-Host "  Sent $($nets.Count) physical Wi-Fi networks to Life OS." -ForegroundColor Green
+            Write-Host "  Sent $(@($nets).Count) physical Wi-Fi networks to Life OS." -ForegroundColor Green
         }
         elseif ($request.StartsWith("CONNECT ")) {
             $payload = $request.Substring(8).Trim()
@@ -131,15 +146,41 @@ try {
             
             Write-Host "  [CONNECT] Attempting connection to SSID: '$targetSsid'" -ForegroundColor Yellow
 
-            # If password is provided, generate a temporary profile
-            if ($password -ne "") {
+            $escapedSsid = [System.Security.SecurityElement]::Escape($targetSsid)
+            if ([string]::IsNullOrWhiteSpace($password)) {
+                # Open Network
                 $profileXml = @"
 <?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
-    <name>$targetSsid</name>
+    <name>$escapedSsid</name>
     <SSIDConfig>
         <SSID>
-            <name>$targetSsid</name>
+            <name>$escapedSsid</name>
+        </SSID>
+    </SSIDConfig>
+    <connectionType>ESS</connectionType>
+    <connectionMode>manual</connectionMode>
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>open</authentication>
+                <encryption>none</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+        </security>
+    </MSM>
+</WLANProfile>
+"@
+            } else {
+                # WPA2-Personal (AES)
+                $escapedPassword = [System.Security.SecurityElement]::Escape($password)
+                $profileXml = @"
+<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>$escapedSsid</name>
+    <SSIDConfig>
+        <SSID>
+            <name>$escapedSsid</name>
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
@@ -154,27 +195,29 @@ try {
             <sharedKey>
                 <keyType>passPhrase</keyType>
                 <protected>false</protected>
-                <keyMaterial>$password</keyMaterial>
+                <keyMaterial>$escapedPassword</keyMaterial>
             </sharedKey>
         </security>
     </MSM>
 </WLANProfile>
 "@
-                $tempFile = [System.IO.Path]::GetTempFileName()
-                [System.IO.File]::WriteAllText($tempFile, $profileXml)
-                netsh wlan add profile filename="$tempFile" user=all | Out-Null
-                Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
             }
+
+            $tempFile = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllText($tempFile, $profileXml, [System.Text.Encoding]::UTF8)
+            netsh wlan add profile filename="$tempFile" user=all | Out-Null
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
 
             # Execute connection via netsh
             netsh wlan connect name="$targetSsid" | Out-Null
             
-            # Verify actual connection status over 3 seconds
+            # Verify actual connection status over 4 seconds
             $connected = $false
-            for ($i = 0; $i -lt 6; $i++) {
+            for ($i = 0; $i -lt 8; $i++) {
                 Start-Sleep -Milliseconds 500
                 $statusCheck = netsh wlan show interfaces
-                if (($statusCheck -join "`n") -match "State\s*:\s*connected" -and ($statusCheck -join "`n") -match "SSID\s*:\s*$([regex]::Escape($targetSsid))") {
+                $statusText = $statusCheck -join "`n"
+                if ($statusText -match "State\s*:\s*connected" -and $statusText -match "SSID\s*:\s*$([regex]::Escape($targetSsid))") {
                     $connected = $true
                     break
                 }

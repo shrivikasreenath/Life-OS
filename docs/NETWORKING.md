@@ -145,3 +145,43 @@ Users can manage Wi-Fi directly from the terminal shell:
 - Selecting a network row highlights it in cyan and populates the connection box.
 - Passwords are typed into the masked input field with `Connect` / `Disconnect` buttons.
 - The taskbar system tray automatically updates with the real SSID name (e.g. `Vedav`) and signal bars!
+
+---
+
+## 6. VirtualBox Freeze Elimination & Non-Blocking State Machine
+
+### 1. Root Cause Analysis
+During initial tests in Oracle VirtualBox, clicking **Scan Now** or **Connect** caused the entire guest operating system to freeze:
+1. **Re-entrant Mutex Deadlock**:
+   - In `src/gui/mod.rs`, `DESKTOP.lock()` was acquired during `update_and_render()` and held across `desktop.handle_mouse(mouse)`.
+   - When the user clicked on a window, `desktop.rs` called `crate::apps::dispatch_click(...)` which called `NETWORK_MANAGER.lock().handle_click(...)`.
+   - Inside `scan_wifi()`, `connect_selected()`, and `disconnect_selected()`, the code called `let mut desktop = crate::gui::desktop::DESKTOP.lock();`.
+   - Because `spin::Mutex` is not re-entrant, this single-threaded spinlock immediately deadlocked the CPU forever.
+2. **Synchronous GUI Starvation**:
+   - The network send function ran a blocking `while pit::uptime_ms() - start < 6500` loop calling `pit::sleep_ms(15)`.
+   - Because this loop executed directly inside the mouse click handler within the GUI frame, the entire GUI event loop was halted, completely freezing the cursor and screen repaints.
+
+### 2. Architectural Solution
+1. **Complete Decoupling of `DESKTOP.lock()`**:
+   - Removed all `DESKTOP.lock()` calls from `network_manager.rs`.
+   - In `desktop.rs`, `handle_mouse` now returns `Option<(AppId, i32, i32, u32, u32)>` for pending window clicks, releasing `DESKTOP.lock()` before dispatching the click to the application.
+   - The system tray Wi-Fi status indicator queries a lock-free helper `get_wifi_tray_status()` via `NETWORK_MANAGER.try_lock()`, ensuring zero lock contention or re-entrancy.
+2. **Non-Blocking Asynchronous State Machine**:
+   - Replaced synchronous waits with `enum WifiOpState`:
+     - `Idle`
+     - `Scanning { handle, start_ms, anim_frame }`
+     - `Connecting { handle, start_ms, anim_frame }`
+     - `Disconnecting { handle, start_ms }`
+   - Non-blocking UDP primitives (`start_host_wifi_command`, `check_host_wifi_response`, `cancel_host_wifi_command`) initiate requests and poll without sleeping.
+   - The state machine is driven frame-by-frame by `update_apps()` called in `src/main.rs`.
+   - The GUI desktop continues rendering at full 60 FPS throughout any scan, connect, or disconnect operation.
+   - Live animated status spinners (`[|]`, `[/]`, `[-]`, `[\]`) indicate in-flight operations.
+3. **Strict Timeouts & Graceful Error Recovery**:
+   - Strict timeouts: 4.0s for scans, 7.5s for connections, 3.5s for disconnections.
+   - Incomplete or missing responses clean up UDP sockets automatically and output human-readable messages (e.g. `Scan timeout: Windows Wi-Fi Bridge did not respond. Check START_WIFI_HELPER.`).
+   - Failed scans are immediately retryable without rebooting the OS.
+4. **Enhanced Host Bridge (`WiFiBridge.ps1`)**:
+   - Deduplicates multiple BSSIDs per SSID (keeping highest signal).
+   - Generates escaped XML profiles for both Open and WPA2-Personal networks.
+   - Accurately reports `[Hidden Network]` for blank SSIDs.
+   - Detects offline or disabled host adapters gracefully.

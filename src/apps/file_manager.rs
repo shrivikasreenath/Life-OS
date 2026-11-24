@@ -24,9 +24,7 @@ impl FileManagerApp {
         }
     }
 
-    pub fn handle_click(&mut self, local_x: i32, local_y: i32, win: &Window) {
-        let bw = win.body_width();
-        let _bh = win.body_height();
+    pub fn handle_click(&mut self, local_x: i32, local_y: i32, bw: u32, _bh: u32) {
 
         // 1. Toolbar clicks (Top 32px)
         if local_y < 32 {

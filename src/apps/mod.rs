@@ -48,9 +48,9 @@ pub fn dispatch_key(app_id: AppId, key: DecodedKey) {
     }
 }
 
-pub fn dispatch_click(app_id: AppId, local_x: i32, local_y: i32, win: &Window) {
+pub fn dispatch_click(app_id: AppId, local_x: i32, local_y: i32, bw: u32, bh: u32) {
     match app_id {
-        AppId::FileManager => file_manager::FILE_MANAGER.lock().handle_click(local_x, local_y, win),
+        AppId::FileManager => file_manager::FILE_MANAGER.lock().handle_click(local_x, local_y, bw, bh),
         AppId::NetworkManager => network_manager::NETWORK_MANAGER.lock().handle_click(local_x, local_y),
         AppId::Games => {
             if let Some(ref mut suite) = *games::GAMES_SUITE.lock() {
@@ -66,4 +66,5 @@ pub fn update_apps() {
     if let Some(ref mut suite) = *games::GAMES_SUITE.lock() {
         suite.update();
     }
+    network_manager::NETWORK_MANAGER.lock().update();
 }

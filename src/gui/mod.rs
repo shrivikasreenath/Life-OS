@@ -149,9 +149,15 @@ pub fn update_and_render() {
 
     // 3. Process mouse inputs & window interactions
     let mouse = get_mouse_state();
+    let pending_click = {
+        let mut desktop = DESKTOP.lock();
+        desktop.handle_mouse(mouse)
+    };
+    if let Some((app_id, local_x, local_y, bw, bh)) = pending_click {
+        crate::apps::dispatch_click(app_id, local_x, local_y, bw, bh);
+    }
     {
         let mut desktop = DESKTOP.lock();
-        desktop.handle_mouse(mouse);
 
         // A. Render Wallpaper
         desktop.render_wallpaper();

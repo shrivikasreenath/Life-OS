@@ -4,7 +4,8 @@ use crate::net::smoltcp_adapter::E1000Device;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
+use smoltcp::iface::{Config, Interface, SocketSet};
+pub use smoltcp::iface::SocketHandle;
 use smoltcp::socket::dhcpv4::{self, Event as DhcpEvent};
 use smoltcp::socket::dns::{self, GetQueryResultError};
 use smoltcp::socket::tcp::{self, State as TcpState};
@@ -298,7 +299,7 @@ pub fn http_get(ip: Ipv4Address, port: u16, host: &str, path: &str) -> Result<St
     }
 }
 
-pub fn send_host_wifi_command(cmd: &str) -> Result<String, &'static str> {
+pub fn start_host_wifi_command(cmd: &str) -> Result<SocketHandle, &'static str> {
     let mut stack_lock = NET_STACK.lock();
     let stack = match *stack_lock {
         Some(ref mut s) => s,
@@ -327,36 +328,72 @@ pub fn send_host_wifi_command(cmd: &str) -> Result<String, &'static str> {
             stack.sockets.remove(handle);
             return Err("UDP bind failed");
         }
-        let _ = socket.send_slice(cmd.as_bytes(), bridge_endpoint);
+        if let Err(_) = socket.send_slice(cmd.as_bytes(), bridge_endpoint) {
+            stack.sockets.remove(handle);
+            return Err("UDP send failed");
+        }
     }
 
-    let start = pit::uptime_ms();
-    let mut response_str = None;
+    // Immediately transmit packet
+    let timestamp = now();
+    stack.interface.poll(timestamp, &mut stack.device, &mut stack.sockets);
 
-    // Timeout: 6500ms allows Windows netsh WLAN scanning and profile connection to complete
-    while pit::uptime_ms() - start < 6500 {
-        let timestamp = now();
-        stack.interface.poll(timestamp, &mut stack.device, &mut stack.sockets);
+    Ok(handle)
+}
 
-        let socket = stack.sockets.get_mut::<udp::Socket>(handle);
-        if socket.can_recv() {
-            let mut buf = [0u8; 4096];
-            if let Ok((n, _)) = socket.recv_slice(&mut buf) {
-                if n > 0 {
-                    response_str = Some(String::from_utf8_lossy(&buf[..n]).into_owned());
-                    break;
-                }
+pub fn check_host_wifi_response(handle: SocketHandle) -> Result<Option<String>, &'static str> {
+    let mut stack_lock = NET_STACK.lock();
+    let stack = match *stack_lock {
+        Some(ref mut s) => s,
+        None => return Err("Network stack not available"),
+    };
+
+    let timestamp = now();
+    stack.interface.poll(timestamp, &mut stack.device, &mut stack.sockets);
+
+    let socket = stack.sockets.get_mut::<udp::Socket>(handle);
+    if socket.can_recv() {
+        let mut buf = [0u8; 4096];
+        if let Ok((n, _)) = socket.recv_slice(&mut buf) {
+            if n > 0 {
+                let response = String::from_utf8_lossy(&buf[..n]).into_owned();
+                stack.sockets.remove(handle);
+                return Ok(Some(response));
             }
         }
-        pit::sleep_ms(15);
     }
 
-    stack.sockets.remove(handle);
+    Ok(None)
+}
 
-    match response_str {
-        Some(res) => Ok(res),
-        None => Err("No response from Windows Wi-Fi Bridge (Check that START_WIFI_HELPER is running)"),
+pub fn cancel_host_wifi_command(handle: SocketHandle) {
+    let mut stack_lock = NET_STACK.lock();
+    if let Some(ref mut stack) = *stack_lock {
+        let _ = stack.sockets.remove(handle);
     }
+}
+
+pub fn send_host_wifi_command(cmd: &str) -> Result<String, &'static str> {
+    send_host_wifi_command_timeout(cmd, 2500)
+}
+
+pub fn send_host_wifi_command_timeout(cmd: &str, timeout_ms: u64) -> Result<String, &'static str> {
+    let handle = start_host_wifi_command(cmd)?;
+    let start = pit::uptime_ms();
+
+    while pit::uptime_ms() - start < timeout_ms {
+        match check_host_wifi_response(handle) {
+            Ok(Some(res)) => return Ok(res),
+            Ok(None) => pit::sleep_ms(10),
+            Err(e) => {
+                cancel_host_wifi_command(handle);
+                return Err(e);
+            }
+        }
+    }
+
+    cancel_host_wifi_command(handle);
+    Err("No response from Windows Wi-Fi Bridge (Check that START_WIFI_HELPER is running)")
 }
 
 pub fn query_host_wifi_bridge() -> Result<String, &'static str> {

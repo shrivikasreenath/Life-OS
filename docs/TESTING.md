@@ -29,7 +29,7 @@ Life OS underwent rigorous end-to-end bare-metal testing across memory managemen
 | :--- | :--- | :--- | :--- | :--- |
 | `TC-BOOT-01` | UEFI 64-bit boot in VirtualBox | Kernel loads via Limine protocol | Limine loads kernel ELF at `0xffffffff80000000` | ✅ PASS |
 | `TC-BOOT-02` | Legacy BIOS hybrid boot | Kernel loads via Limine BIOS stages | Stage 1 and 2 MBR/GPT boots cleanly | ✅ PASS |
-| `TC-BOOT-03` | ISO Size compliance | File size strictly < 100 MB | Exactly **3.52 MB** (3,690,496 bytes) | ✅ PASS |
+| `TC-BOOT-03` | ISO Size compliance | File size strictly < 100 MB | Exactly **3.54 MB** (3,706,880 bytes) | ✅ PASS |
 | `TC-BOOT-04` | Kernel panic handler | Prints panic info and halts CPU | Panic prints formatted string to COM1 | ✅ PASS |
 | `TC-BOOT-05` | Double fault IST handling | Intercepts stack faults without Triple Fault | IST index 0 catches double fault cleanly | ✅ PASS |
 
@@ -62,6 +62,11 @@ Life OS underwent rigorous end-to-end bare-metal testing across memory managemen
 | `TC-NET-06` | Wi-Fi Terminal Status CLI | `wifi status` outputs interface connection | Printed `CONNECTED|Vedav's Iphone|...` | ✅ PASS |
 | `TC-NET-07` | Wi-Fi Connection Protocol | Sends `CONNECT <SSID>\|<key>` to Windows WLAN | Helper verified profile and connection | ✅ PASS |
 | `TC-NET-08` | Dynamic System Tray SSID | Tray updates with connected Wi-Fi name | Tray displays green signal bars & `Vedav` | ✅ PASS |
+| `TC-NET-09` | Zero-Freeze Wi-Fi Scanning | Desktop and cursor remain responsive at 60 FPS | Verified zero freeze during repeated scans | ✅ PASS |
+| `TC-NET-10` | Masked Password Field | Input displayed as asterisks (`*`) with backspace | Verified secure entry; no plain text logged | ✅ PASS |
+| `TC-NET-11` | Non-Blocking Connection | Connect command polls asynchronously | GUI remains interactive; status updates live | ✅ PASS |
+| `TC-NET-12` | Wi-Fi Disconnection Workflow | Disconnect updates GUI & tray to `Bridg` | Verified status `SUCCESS: Disconnected` | ✅ PASS |
+| `TC-NET-13` | Graceful Timeout & Instant Retry | Missing bridge times out at 4.0s without hang | Verified timeout error; scans immediately retryable | ✅ PASS |
 
 ### E. Terminal Shell Tests (All 23 Required Commands)
 | Command | Verification Criteria | Observed Output | Status |

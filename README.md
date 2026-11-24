@@ -4,7 +4,7 @@
 **Project:** College Final Year Engineering Project  
 **Architecture:** x86_64 (Bare-Metal, `no_std`, `no_main`)  
 **Language:** 100% Rust  
-**Final Bootable ISO Size:** **3.52 MB** (3,690,496 bytes) — *Strictly below the 100 MB requirement!*
+**Final Bootable ISO Size:** **3.54 MB** (3,706,880 bytes) — *Strictly below the 100 MB requirement!*
 
 ---
 
@@ -21,32 +21,22 @@
 
 ---
 
-## 📸 Screenshots from Live Oracle VirtualBox Execution
+## 📸 Verified Live Screenshots (VirtualBox Execution)
 
 | Feature | Screenshot | Description |
 | :--- | :--- | :--- |
-| **Complete Graphical Desktop** | ![Desktop](docs/screenshots/life_os_desktop_upgraded.png) | 8 desktop icons with 32x32 pixel art, taskbar with pinned quick-launch apps, system tray with ETH LED & live Wi-Fi SSID |
-| **Terminal & Identity** | ![Terminal](docs/screenshots/life_os_whoami_upgraded.png) | Interactive shell with cyan border, `whoami` returning `shrivika` |
-| **Start Menu Launcher** | ![Start Menu](docs/screenshots/life_os_start_menu.png) | Start menu with Shrivika user avatar, 8 app shortcuts (hotkeys 1-8), and power controls |
-| **Calendar Pop-up Panel** | ![Calendar](docs/screenshots/life_os_calendar.png) | Full calendar grid with current date highlighted, opened via tray clock or `F2` |
-| **Desktop Context Menu** | ![Context Menu](docs/screenshots/life_os_context_menu.png) | Right-click context menu (Refresh, Change Wallpaper, Arrange Icons, Create Folder, Open Terminal, Settings, SysInfo) |
-| **Cycled Desktop Wallpaper** | ![Wallpaper](docs/screenshots/life_os_wallpaper_theme.png) | Deep Cobalt Aurora theme (3 selectable wallpapers switchable on the fly via `F5`) |
-| **Network & Wi-Fi Manager** | ![Wi-Fi Manager](docs/screenshots/life_os_wifi_manager.png) | Discovered real physical Wi-Fi network `Vedav's Iphone` (94% signal, WPA2, 2.4 GHz ch6, Connected) |
-| **Wi-Fi Network Selection** | ![Wi-Fi Selected](docs/screenshots/life_os_wifi_selected.png) | Wi-Fi network selection row, masked password input box, Connect and Disconnect buttons |
-| **Terminal Wi-Fi Scanner** | ![Wi-Fi Scan](docs/screenshots/life_os_wifi_scan_cli.png) | Terminal command `wifi scan` discovering real laptop physical Wi-Fi networks |
-| **Terminal Wi-Fi Status** | ![Wi-Fi Status](docs/screenshots/life_os_wifi_status_cli.png) | Terminal command `wifi status` querying live connection state from Windows WLAN API |
-| **Terminal Wi-Fi Connect** | ![Wi-Fi Connect](docs/screenshots/life_os_wifi_connect_cli.png) | Terminal command `wifi connect` verifying live connection attempt over UDP bridge |
-| **File Manager (LifeFS)** | ![File Manager](docs/screenshots/life_os_file_manager.png) | Graphical explorer with toolbar (+File, +Folder, Delete, Up ..), breadcrumb path, and file list |
-| **File Manager File Creation**| ![File Created](docs/screenshots/life_os_file_created.png) | Real-time creation of files and folders inside in-memory virtual filesystem |
-| **File Manager Text Viewer** | ![File Preview](docs/screenshots/life_os_file_preview.png) | Built-in text file preview overlay reading `Kernel_Architecture.txt` |
-| **Life Web Browser** | ![Browser](docs/screenshots/life_os_browser.png) | Web browser with navigation buttons (`<`, `>`, `R`, `H`), URL input, and `life://welcome` page |
-| **System Information** | ![SysInfo](docs/screenshots/life_os_sysinfo.png) | Hardware telemetry: 4102 MB RAM, 32 MB heap pool, x86_64 CPU features, uptime ticks |
-| **System Settings** | ![Settings](docs/screenshots/life_os_settings.png) | System settings panel with theme controls, RTC timezone, and power buttons |
-| **Maximized Window** | ![Maximized](docs/screenshots/life_os_settings_maximized.png) | Window management: full maximize/restore above taskbar (`F12`) |
-| **Games: Snake Classic** | ![Snake](docs/screenshots/life_os_games_snake.png) | Real-time Snake arcade game with live scoring and food collection |
-| **Games: Retro Pong** | ![Pong](docs/screenshots/life_os_games_pong.png) | 2-player/AI arcade Pong with collision physics and score counter |
-| **Games: Tic-Tac-Toe** | ![TicTacToe](docs/screenshots/life_os_games_tictactoe.png) | Interactive 3x3 strategy game with win/draw tracking |
-| **Games: 2048 Puzzle** | ![2048](docs/screenshots/life_os_games_2048.png) | Full 4x4 sliding puzzle game with tile-combining mechanics |
+| **Complete Graphical Desktop** | ![Desktop](docs/screenshots/boot_desktop.png) | 8 desktop icons with 32x32 pixel art, taskbar with pinned quick-launch apps, system tray with ETH status & live Wi-Fi SSID |
+| **Terminal & Identity (`whoami`)** | ![Terminal](docs/screenshots/whoami_success.png) | Interactive shell with cyan border, `whoami` returning `shrivika` |
+| **Real Wi-Fi Discovery (Scan)** | ![Wi-Fi Scan](docs/screenshots/repeated_scan_success.png) | Discovered real nearby physical networks (`Vedav's Iphone`, `AirFiber`, `Z3phs7u5`, `Airtel`) with signal % & band |
+| **Wi-Fi Network Selection** | ![Wi-Fi Selected](docs/screenshots/network_selected.png) | Highlighted selection row, signal strength meter, frequency band (2.4 GHz ch6), and security type |
+| **Masked Password Field** | ![Password Masked](docs/screenshots/password_masked.png) | Secure credential entry with asterisk masking (`*`), backspace editing, and cyan focus outline |
+| **Real Wi-Fi Connection** | ![Wi-Fi Connected](docs/screenshots/connecting_result.png) | Real connection to physical AP via Windows WLAN API; status reports `SUCCESS: Connected to Vedav's Iphone` |
+| **Wi-Fi Disconnection** | ![Wi-Fi Disconnected](docs/screenshots/disconnect_result.png) | Dynamic disconnect workflow updating status to `SUCCESS: Disconnected` and system tray to `Bridg` |
+| **Graceful Scan Timeout** | ![Scan Timeout](docs/screenshots/scan_timeout_handled.png) | Missing host helper produces clean readable error after 4.0s without freezing the desktop |
+| **Instant Scan Retry** | ![Scan Retry](docs/screenshots/scan_retry_success.png) | Failed scans are immediately retryable without kernel reboot or VM restart |
+| **Start Menu Launcher** | ![Start Menu](docs/screenshots/start_menu_opened.png) | Start menu with Shrivika user avatar, 8 app shortcuts (hotkeys 1-8), and power controls |
+| **Games Suite (4-in-1)** | ![Games](docs/screenshots/games_suite_active.png) | Arcade suite featuring Snake Classic, Retro Pong, Tic-Tac-Toe, and 2048 |
+| **Wallpaper Cycling (`F5`)** | ![Wallpaper](docs/screenshots/wallpaper_changed.png) | Midnight Dark Horizon theme (3 selectable wallpapers switchable on the fly via `F5`) |
 
 ---
 

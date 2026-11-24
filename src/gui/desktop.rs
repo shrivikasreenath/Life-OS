@@ -243,10 +243,11 @@ impl Desktop {
         }
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseState) {
+    pub fn handle_mouse(&mut self, mouse: MouseState) -> Option<(AppId, i32, i32, u32, u32)> {
         let (screen_w, screen_h) = get_dimensions();
         let tb_y = screen_h as i32 - TASKBAR_HEIGHT as i32;
         let now_ms = pit::uptime_ms();
+        let mut body_click = None;
 
         // 1. Right Click on Desktop (Context Menu)
         if mouse.right_button && !self.prev_mouse.right_button {
@@ -260,7 +261,7 @@ impl Desktop {
                     self.start_menu_open = false;
                     self.calendar_open = false;
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
             }
         }
@@ -324,7 +325,7 @@ impl Desktop {
             }
             self.context_menu_open = false;
             self.prev_mouse = mouse;
-            return;
+            return None;
         }
 
         // 4. Handle Window Titlebar Dragging
@@ -356,7 +357,7 @@ impl Desktop {
                     self.start_menu_open = !self.start_menu_open;
                     self.calendar_open = false;
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
 
                 // 2. Pinned Quick-Launch App Shortcuts: (112..250)
@@ -364,22 +365,22 @@ impl Desktop {
                 if mouse.x >= 112 && mouse.x <= 142 {
                     self.open_app(AppId::Browser);
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
                 if mouse.x >= 146 && mouse.x <= 176 {
                     self.open_app(AppId::Terminal);
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
                 if mouse.x >= 180 && mouse.x <= 210 {
                     self.open_app(AppId::FileManager);
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
                 if mouse.x >= 214 && mouse.x <= 244 {
                     self.open_app(AppId::Games);
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
 
                 // 3. System Tray Clicks (Right side)
@@ -388,14 +389,14 @@ impl Desktop {
                 if mouse.x >= tray_start_x + 35 && mouse.x <= tray_start_x + 95 {
                     self.open_app(AppId::NetworkManager);
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
 
                 // Volume Icon Click: toggles mute
                 if mouse.x >= tray_start_x + 100 && mouse.x <= tray_start_x + 125 {
                     self.volume_muted = !self.volume_muted;
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
 
                 // Clock/Date Click: toggles Calendar Pop-up Panel
@@ -403,7 +404,7 @@ impl Desktop {
                     self.calendar_open = !self.calendar_open;
                     self.start_menu_open = false;
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 }
 
                 // 4. Running Window Tabs (256..tray_start_x)
@@ -419,13 +420,13 @@ impl Desktop {
                             self.focus_window(w.id);
                         }
                         self.prev_mouse = mouse;
-                        return;
+                        return None;
                     }
                     tab_x += tab_w + 4;
                 }
 
                 self.prev_mouse = mouse;
-                return;
+                return None;
             }
 
             // B. Check Start Menu Click
@@ -435,7 +436,7 @@ impl Desktop {
                 if mouse.x >= sm_x && mouse.x <= sm_x + START_MENU_WIDTH as i32 && mouse.y >= sm_y && mouse.y < tb_y {
                     self.handle_start_menu_click(mouse.x - sm_x, mouse.y - sm_y);
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 } else {
                     self.start_menu_open = false;
                 }
@@ -450,7 +451,7 @@ impl Desktop {
                 if mouse.x >= cal_x && mouse.x <= cal_x + cal_w && mouse.y >= cal_y && mouse.y < tb_y {
                     // Inside calendar
                     self.prev_mouse = mouse;
-                    return;
+                    return None;
                 } else {
                     self.calendar_open = false;
                 }
@@ -467,7 +468,7 @@ impl Desktop {
                         let id = w.id;
                         self.close_window(id);
                         self.prev_mouse = mouse;
-                        return;
+                        return None;
                     }
 
                     // Check maximize button
@@ -475,7 +476,7 @@ impl Desktop {
                         let id = w.id;
                         self.toggle_maximize(id);
                         self.prev_mouse = mouse;
-                        return;
+                        return None;
                     }
 
                     // Check minimize button
@@ -483,7 +484,7 @@ impl Desktop {
                         let id = w.id;
                         self.toggle_minimize(id);
                         self.prev_mouse = mouse;
-                        return;
+                        return None;
                     }
 
                     // Check titlebar drag
@@ -492,7 +493,7 @@ impl Desktop {
                     } else if mouse.y >= w.body_y() {
                         let local_x = mouse.x - w.body_x();
                         let local_y = mouse.y - w.body_y();
-                        crate::apps::dispatch_click(w.app_id, local_x, local_y, w);
+                        body_click = Some((w.app_id, local_x, local_y, w.body_width(), w.body_height()));
                     }
 
                     break;
@@ -502,7 +503,7 @@ impl Desktop {
             if let Some(id) = clicked_win_id {
                 self.focus_window(id);
                 self.prev_mouse = mouse;
-                return;
+                return body_click;
             }
 
             // E. Check Desktop Icon Click & Selection
@@ -548,6 +549,7 @@ impl Desktop {
         }
 
         self.prev_mouse = mouse;
+        body_click
     }
 
     fn prevent_icon_overlap(&mut self, moved_idx: usize) {
@@ -751,15 +753,16 @@ impl Desktop {
         draw_text(tray_x + 18, tb_y + 11, "ETH", Color::rgb(203, 213, 225), None);
 
         // Wi-Fi Status Indicator
-        let wifi_color = if self.wifi_bridge_connected {
+        let (wifi_conn, wifi_ssid, _wifi_sig) = crate::apps::network_manager::get_wifi_tray_status();
+        let wifi_color = if wifi_conn {
             Color::rgb(34, 197, 94)
         } else {
             Color::rgb(148, 163, 184)
         };
         draw_icon(tray_x + 50, tb_y + 11, AppIcon::Network);
-        let wifi_label = if !self.current_wifi_ssid.is_empty() {
-            &self.current_wifi_ssid[..]
-        } else if self.wifi_bridge_connected {
+        let wifi_label = if !wifi_ssid.is_empty() {
+            &wifi_ssid[..]
+        } else if wifi_conn {
             "Wi-Fi"
         } else {
             "Bridge"
