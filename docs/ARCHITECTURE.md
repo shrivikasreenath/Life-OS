@@ -14,16 +14,18 @@ Life OS is designed around an autonomous microkernel model built purely in Rust 
 +-----------------------------------------------------------------------------------+
 |                              USER ENVIRONMENT / GUI                               |
 |  +--------------------+ +--------------------+ +--------------------+ +---------+ |
-|  | Terminal (22 cmds) | | Life Web Browser   | | Games (4-in-1)     | | FileMgr | |
+|  | Terminal (23 cmds) | | Life Web Browser   | | Games (4-in-1)     | | FileMgr | |
 |  +--------------------+ +--------------------+ +--------------------+ +---------+ |
 |  | SysInfo            | | System Settings    | | About Life OS      | | NetMgr  | |
 |  +--------------------+ +--------------------+ +--------------------+ +---------+ |
+|    Desktop Icons (8)  |  Context Menu (F3)   |  Calendar Pop-up(F2) |  Taskbar  | |
 |              Window Manager & Desktop Compositor (Double-Buffered)                |
 +-----------------------------------------------------------------------------------+
 |                             CORE SERVICES & STACKS                                |
 |  +---------------------------------+ +------------------------------------------+ |
-|  |  LifeFS (Virtual File System)   | | smoltcp Network Stack (IPv4/TCP/UDP/DNS) | |
+|  | LifeFS (In-Memory VFS Tree)     | | smoltcp Network Stack (IPv4/TCP/UDP/DNS) | |
 |  +---------------------------------+ +------------------------------------------+ |
+|                                      | Host Wi-Fi Bridge (UDP Client 10.0.2.2)  | |
 +-----------------------------------------------------------------------------------+
 |                                 DEVICE DRIVERS                                    |
 |  +-----------------+ +-----------------+ +-----------------+ +------------------+ |
@@ -146,9 +148,9 @@ Double faults utilize a dedicated Interrupt Stack Table (IST Index 0) to ensure 
 
 ---
 
-## 5. Intel 82540EM (e1000) Network Driver
+## 5. Intel 82540EM (e1000) Network Driver & Host Bridge
 
-Located in `src/drivers/e1000.rs`:
+Located in `src/drivers/e1000.rs` and `src/net/stack.rs`:
 - **PCI Enumeration**: Scans PCI bus for Vendor ID `0x8086` and Device ID `0x100e` (Oracle VirtualBox e1000).
 - **Bus Mastering**: Enables PCI Bus Master and Memory Space access bits.
 - **MMIO Access**: Reads BAR0 physical base address and maps it to virtual memory through HHDM.
@@ -156,11 +158,10 @@ Located in `src/drivers/e1000.rs`:
 - **Circular DMA Descriptor Rings**:
   - 32 Receive (RX) descriptors (`E1000_NUM_RX_DESC`) with 2048-byte physical packet buffers.
   - 32 Transmit (TX) descriptors (`E1000_NUM_TX_DESC`) with 2048-byte physical packet buffers.
-- **Hardware Registers**:
-  - `CTRL` (0x0000): Software reset and Link-Up configuration.
-  - `RCTL` (0x0100): Receiver enable, broadcast accept, multicast pass.
-  - `TCTL` (0x0400): Transmitter enable, pad short packets, collision distance.
-  - `RDBAL`/`RDBAH`, `TDBAL`/`TDBAH`: Physical 64-bit descriptor ring addresses.
+- **Windows Wi-Fi Host Bridge Integration**:
+  - Inter-process UDP communication over `10.0.2.2:18888`.
+  - Commands supported: `SCAN`, `STATUS`, `CONNECT <SSID>|<pwd>`, `DISCONNECT`.
+  - Automatically updates the taskbar system tray with the connected SSID.
 
 ---
 
@@ -168,13 +169,20 @@ Located in `src/drivers/e1000.rs`:
 
 Located in `src/graphics/` and `src/gui/`:
 - **Double-Buffering**: Framebuffer backbuffer allocated as `Vec<u32>` of size `width * height`.
-  - All rendering (wallpaper, window frames, text, icons, cursor) occurs in memory.
-  - `present()` performs high-speed `core::ptr::copy_nonoverlapping` row-by-row to the physical VRAM.
-- **Window Management**:
+  - All rendering (wallpaper, icons, window frames, text, cursor) occurs in memory.
+  - `present()` performs high-speed `core::ptr::copy_nonoverlapping` to the physical VRAM.
+- **Desktop Application Icons**:
+  - 8 desktop icons with 32x32 pixel art (Browser, Terminal, File Manager, Network Manager, Games, SysInfo, Settings, Trash).
+  - Single-click selection, double-click launch, and dragging support.
+- **Desktop Right-Click Context Menu (`F3`)**:
+  - Actions: Refresh Desktop, Change Wallpaper, Arrange Icons, Create Folder, Open Terminal, Display Settings, System Info.
+- **3 Procedural Wallpapers (`F5`)**:
+  - Cyber Grid (Default), Deep Cobalt Aurora, Midnight Slate.
+- **Calendar Pop-up Panel (`F2`)**:
+  - Opened via clock click or `F2`, displaying full month grid and highlighted current day.
+- **Window Management Engine**:
   - Z-ordering: Active window sits at the end of the window list and renders last (on top).
   - Titlebar drag: Moves window `(x, y)` dynamically based on mouse drag delta.
-  - Minimize/Maximize/Close: Standard window controls with state preservation.
-- **Desktop UI**:
-  - Cyber grid wallpaper rendered algorithmically with anti-aliased cross-hatchings.
-  - 36px bottom taskbar featuring Start button, active app tabs, Ethernet LED, Wi-Fi icon, and real-time clock.
-  - Pop-up Start Menu displaying Shrivika's profile, application launch list, and power controls.
+  - Minimize/Maximize/Close: Standard window controls (`F12` to maximize, `F4` to close).
+- **Global Hotkey Architecture**:
+  - `F1` (Start Menu), `F2` (Calendar), `F3` (Context Menu), `F4` (Close), `F5` (Cycle Wallpaper), `F6` (Cycle Focus), `F7` (Games), `F8` (Browser), `F9` (SysInfo), `F10` (Settings), `F12` (Maximize), `1..8` (Start Menu Launchers).

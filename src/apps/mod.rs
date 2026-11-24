@@ -37,11 +37,13 @@ pub fn dispatch_key(app_id: AppId, key: DecodedKey) {
     match app_id {
         AppId::Terminal => terminal::TERMINAL.lock().handle_key(key),
         AppId::Browser => browser::BROWSER.lock().handle_key(key),
+        AppId::FileManager => file_manager::FILE_MANAGER.lock().handle_key(key),
         AppId::Games => {
             if let Some(ref mut suite) = *games::GAMES_SUITE.lock() {
                 suite.handle_key(key);
             }
         }
+        AppId::NetworkManager => network_manager::NETWORK_MANAGER.lock().handle_key(key),
         _ => {}
     }
 }

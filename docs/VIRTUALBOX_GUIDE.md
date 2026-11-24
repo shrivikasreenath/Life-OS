@@ -66,51 +66,37 @@ Before starting the machine, open **Settings** (`Ctrl+S`) and verify:
     - **Cable Connected:** Checked.
   - *Why:* The Life OS kernel includes a dedicated native driver (`src/drivers/e1000.rs`) written specifically for PCI Device ID `0x100e` (Intel 82540EM).
 
-### 4. Serial Port Settings (Recommended for Live Kernel Telemetry)
-- To capture live kernel debug output:
-  - Check **Enable Serial Port**.
-  - **Port Number:** `COM1` (IRQ 4, I/O Port `0x3F8`).
-  - **Port Mode:** `Raw File` (or `Disconnected`).
-  - **Path/Address:** `C:\Users\USER\VirtualBox VMs\Life OS\serial.log`.
-
 ---
 
-## 3. CLI Configuration via VBoxManage
+## 3. Host Wi-Fi Bridge Activation (CRITICAL)
 
-If you prefer configuring via PowerShell or Windows Command Prompt:
+To enable real Wi-Fi network scanning from within Life OS:
+
+### Step 1: Enable VirtualBox NAT Host Loopback Routing
+By default, VirtualBox NAT security drops guest packets sent to the host loopback `10.0.2.2`. To allow Life OS to reach the Windows Wi-Fi helper on port 18888, run this command in Windows PowerShell:
 ```powershell
-# Create VM
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" createvm --name "Life OS" --ostype "Other_64" --register
-
-# Configure CPU, Memory, Firmware, and Display
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" modifyvm "Life OS" --memory 4096 --cpus 2 --firmware efi64 --vram 128 --graphicscontroller vboxsvga
-
-# Configure Storage Controller and Attach ISO
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" storagectl "Life OS" --name "IDE" --add ide
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" storageattach "Life OS" --storagectl "IDE" --port 0 --device 0 --type dvddrive --medium "C:\Users\USER\Downloads\LifeOS.iso"
-
-# Configure Intel 82540EM NIC with NAT
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" modifyvm "Life OS" --nic1 nat --nictype1 82540EM --cableconnected1 on
-
-# Enable COM1 Serial Logging to file
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" modifyvm "Life OS" --uart1 0x3f8 4 --uartmode1 file "C:\Users\USER\VirtualBox VMs\Life OS\serial.log"
-
-# Start the VM
-& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" startvm "Life OS"
+& 'C:\Program Files\Oracle\VirtualBox\VBoxManage.exe' modifyvm "Life OS" --nat-localhostreachable1 on
 ```
+*(Verify that `showvminfo "Life OS"` reports `LocalhostReachable: 1`).*
+
+### Step 2: Start the Windows Wi-Fi Bridge Helper
+On the Windows host laptop:
+1. Navigate to `host_bridge/` inside the project folder.
+2. Double-click `START_WIFI_HELPER.bat` (or run `powershell.exe -ExecutionPolicy Bypass -File host_bridge\WiFiBridge.ps1`).
+3. The helper will report:
+   ```
+   ============================================================
+            LIFE OS — WINDOWS HOST WI-FI BRIDGE HELPER          
+   ============================================================
+     Owner: Shrivika
+     Listening on UDP 0.0.0.0:18888
+     Ready to serve Wi-Fi scan and status requests from Life OS
+   ```
+4. Now boot Life OS! When you open `Network & Wi-Fi Manager` or run `wifi scan` in the terminal, real physical Wi-Fi networks in the room will be discovered immediately!
 
 ---
 
-## 4. Troubleshooting & FAQ
-
-### Issue: Screen remains black on early boot
-- **Cause:** Virtual machine configured with legacy BIOS having disk geometry translation mismatch.
-- **Solution:** Change firmware to `EFI64` under **System -> Motherboard -> Enable EFI**.
-
-### Issue: Network status shows "Link Down" or "No NIC"
-- **Cause:** Network adapter type is set to PCnet-FAST III or VirtIO instead of Intel PRO/1000 MT.
-- **Solution:** In VM Settings -> Network -> Advanced -> Adapter Type, select **Intel PRO/1000 MT Desktop (82540EM)**.
-
-### Issue: Keyboard input feels unresponsive
-- **Cause:** VirtualBox window has lost mouse/keyboard focus.
-- **Solution:** Click inside the VM display window to capture PS/2 mouse and keyboard input.
+## 4. Booting and Running Life OS
+1. In VirtualBox, select **Life OS** and click **Start**.
+2. Limine will display the boot menu and launch the kernel within 2 seconds.
+3. The high-resolution desktop (1024x768 @ 32 bpp) will appear with 8 desktop icons, taskbar, terminal shell, and live hardware telemetry!

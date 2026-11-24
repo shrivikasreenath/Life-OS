@@ -9,10 +9,18 @@
 ## 🎯 Presentation Objectives
 
 1. Demonstrate that Life OS is a **genuine custom bare-metal microkernel** written 100% in pure Rust (`no_std`, `no_main`), not a rebranded Linux distribution or Ubuntu reskin.
-2. Prove that the ISO size requirement of **strictly under 100 MB** is overwhelmingly satisfied (**3.41 MB actual size**).
+2. Prove that the ISO size requirement of **strictly under 100 MB** is overwhelmingly satisfied (**3.52 MB actual size**).
 3. Showcase the **live interactive terminal**, highlighting that `whoami` returns `shrivika`.
 4. Demonstrate **genuine memory management**, **hardware interrupt architecture**, and **Intel 82540EM networking**.
-5. Showcase the polished **desktop environment**, **window compositor**, and **4 playable arcade games**.
+5. Showcase the polished **graphical desktop environment**:
+   - 8 Desktop Application Icons with drag-and-drop and double-click launching.
+   - Upgraded Taskbar with pinned shortcuts, running window tabs, tray LEDs, and live connected Wi-Fi SSID.
+   - Calendar Pop-up Panel on clock click or `F2`.
+   - Desktop Right-Click Context Menu (`F3`).
+   - 3 Procedural Wallpaper Themes (`F5`).
+   - File Manager with file/folder creation, deletion, and built-in text previewer.
+   - Real Wi-Fi discovery and connection through the Windows Wi-Fi Host Bridge.
+   - 4 Playable Arcade Games (Snake, Pong, Tic-Tac-Toe, 2048).
 
 ---
 
@@ -26,7 +34,7 @@
 
 - **Key Slide / Metric to highlight:**
   - Mandatory ISO Size constraint: Strictly < 100 MB.
-  - Actual Life OS ISO Size: **3.41 MB** (More than 96 MB under the limit!).
+  - Actual Life OS ISO Size: **3.52 MB** (Over 96 MB under the limit!).
 
 ---
 
@@ -38,11 +46,11 @@
 - **What to say:**
   > *"Notice how the operating system boots cleanly using the Limine 64-bit bootloader protocol. In less than two seconds, the kernel initializes our serial debugging logger, loads the Global Descriptor Table and Task State Segment, configures our Interrupt Descriptor Table with IST stack protection, remaps the dual 8259 PICs, and calibrates our timer at 100 Hz.*
   > 
-  > *Immediately following interrupt setup, our custom Physical Frame Allocator traverses the memory map, maps the physical memory through Higher-Half Direct Map Paging, and initializes a dynamic 32 MB kernel heap."*
+  > *Immediately following interrupt setup, our custom Physical Frame Allocator traverses the memory map, maps physical memory through Higher-Half Direct Map Paging, and initializes a dynamic 32 MB kernel heap."*
 
 ---
 
-### Part 3: Live Terminal Demonstration (4 Minutes)
+### Part 3: Live Terminal Demonstration (3 Minutes)
 - **Action:** Click into the Terminal window.
 - **Commands to demonstrate in sequence:**
   1. `whoami`
@@ -55,51 +63,50 @@
      - **Say:** *"Notice this is not hardcoded text; the kernel queries the physical Limine memory map, showing our exact 4 GB VirtualBox allocation."*
   4. `cpu`
      - **Output:** Shows processor family, Long Mode features, and live PIT timer ticks.
-  5. `ls` and `cat README.txt`
-     - **Output:** Reads the file from our in-memory Virtual File System (LifeFS).
-  6. `network` and `ifconfig`
-     - **Output:** Shows Intel 82540EM Gigabit NIC MAC address (`08:00:27:...`), IP `10.0.2.15`, and gateway `10.0.2.2`.
-  7. `ping 10.0.2.2`
-     - **Output:** ICMP echo statistics.
+  5. `network` and `ifconfig`
+     - **Output:** Shows Intel 82540EM Gigabit NIC MAC address, IP `10.0.2.15`, and gateway `10.0.2.2`.
 
 ---
 
-### Part 4: Desktop Environment & Applications (4 Minutes)
-- **Action:** Demonstrate window management interactions.
-  1. **Window Dragging:** Grab the Terminal titlebar with the mouse and drag it smoothly across the desktop.
-  2. **Minimizing/Restoring:** Click the yellow minimize button; show the taskbar tab restore it.
-  3. **Launch Web Browser:**
-     - Type `browser` in Terminal or click Browser in Start Menu.
-     - Show the address bar, navigation buttons, and `life://welcome` page.
-  4. **Launch Games Suite:**
-     - Type `games` in Terminal.
-     - Play a few moves in **Snake** (steer with arrow keys).
-     - Switch to **Retro Pong** (press `2`) — show the ball bounce and paddles move!
-     - Switch to **Tic-Tac-Toe** (press `3`) — make a move with `Space`!
-     - Switch to **2048** (press `4`) — slide tiles with arrow keys!
+### Part 4: Real Wi-Fi Discovery Demonstration (3 Minutes)
+- **Action:**
+  1. In Terminal, type `wifi scan`.
+     - **Output:**
+       ```
+       Scanning physical Wi-Fi networks via Windows Host Bridge (10.0.2.2:18888)...
+       Found 1 physical Wi-Fi network(s):
+         • Vedav's Iphone    94%  WPA2-Personal  2.4 GHz ch6 [CONNECTED]
+       ```
+     - Point out the taskbar system tray: the Wi-Fi icon is green with label `Vedav`!
+  2. Open **Network & Wi-Fi Manager**:
+     - Switch to the `Wi-Fi (Host Bridge)` tab (`w`).
+     - Point out the table showing SSID, green signal progress bar + `94%`, `2.4 GHz (ch6)`, `WPA2-Personal`, and `Connected` state!
+     - Show network selection (`Selected: Vedav's Iphone`), password box, and `Connect` / `Disconnect` buttons.
 - **What to say:**
-  > *"Every graphical window is double-buffered in our kernel framebuffer to ensure zero screen tearing. Our games suite runs directly on the PIT timer tick loop, demonstrating genuine real-time multitasking within our microkernel event loop."*
+  > *"Because virtual hypervisors do not expose physical Wi-Fi radios directly to guest VMs, we engineered a genuine UDP inter-process bridge. Life OS queries our companion Windows helper on UDP port 18888, which scans actual physical Wi-Fi access points in the room via Windows Native WLAN APIs. Notice that it discovered our real live hotspot `Vedav's Iphone` at 94% signal strength, and dynamically updated the taskbar tray!"*
 
 ---
 
-### Part 5: Wi-Fi Host Bridge & Conclusion (2 Minutes)
+### Part 5: Graphical Desktop, File Manager & Games (4 Minutes)
+- **Action:**
+  1. **Desktop Icons:** Show the 8 desktop icons with 32x32 pixel art. Drag an icon to show movement.
+  2. **Context Menu:** Press `F3` or right-click to show the context menu. Press `F5` to cycle between the 3 procedural wallpapers!
+  3. **Calendar:** Click the clock or press `F2` to show the calendar pop-up panel with today's date highlighted!
+  4. **Start Menu:** Press `F1` or click Start. Show Shrivika's avatar and the 8 application shortcuts.
+  5. **File Manager:**
+     - Launch File Manager (`F3` -> Open File Manager or `files` in terminal).
+     - Point out `/home/shrivika`, `/home/shrivika/Documents`, `/home/shrivika/Projects`.
+     - Press `n` or click `+ File` to create `note_4.txt` live!
+     - Open `Kernel_Architecture.txt` to show the built-in text preview overlay!
+     - *Say:* *"LifeFS is an in-memory virtual filesystem where files and directories can be dynamically created and inspected."*
+  6. **Games Suite:**
+     - Press `F7` to launch the Games Suite!
+     - Press `1` for Snake, `2` for Retro Pong (show the ball bounce!), `3` for Tic-Tac-Toe, `4` for 2048!
+
+---
+
+### Part 6: Summary & Conclusion (1 Minute)
 - **What to say:**
-  > *"Because VirtualBox only exposes a virtual Ethernet controller to guest virtual machines, Life OS implements an intelligent dual-channel network architecture: virtual Ethernet for genuine internet packet transit, and a lightweight Windows host bridge that scans physical laptop Wi-Fi networks in the classroom and reports live SSIDs to the guest over UDP.*
+  > *"To summarize: Life OS demonstrates an end-to-end bare-metal operating system built from scratch in Rust. We have verified genuine memory allocation, hardware interrupt dispatching, an Intel gigabit NIC driver with smoltcp networking, a real Windows Wi-Fi host bridge, and a complete graphical desktop environment with 8 applications and 4 playable games — all packed into a tiny, bootable 3.52 MB ISO.*
   > 
-  > *In summary, Life OS proves that safe, bare-metal systems programming in Rust can deliver a complete, bootable microkernel, genuine networking, and a rich desktop experience within a 3.4 MB footprint. Thank you, and I now welcome any questions!"*
-
----
-
-## 💡 Evaluator Questions & Technical Answers Cheat-Sheet
-
-**Q: Did you use Linux or a Linux-based kernel?**  
-*A: No. Life OS compiles with `#![no_std]` and `#![no_main]` targeting `x86_64-unknown-none`. There is zero Linux code, standard C library, or POSIX layer.*
-
-**Q: How do you prevent double faults on stack overflow?**  
-*A: We configured a Task State Segment (TSS) with an Interrupt Stack Table (IST Index 0). When an exception or stack fault occurs, the CPU automatically switches to a dedicated 20 KB stack, preventing triple faults.*
-
-**Q: How is memory allocated dynamically without a host OS?**  
-*A: We implemented a two-tier memory manager: a Physical Frame Allocator that manages 4096-byte pages based on the Limine memory map, and a 32 MB heap managed by a Locked Heap linked list allocator that powers Rust's `Vec` and `String`.*
-
-**Q: How does the network adapter work?**  
-*A: We wrote a PCI bus scanner to locate Vendor 0x8086, Device 0x100E (Intel 82540EM). We configure MMIO BAR0, establish 32-entry circular RX and TX DMA descriptor rings with 2KB physical buffers, and interface it with `smoltcp` for TCP/IP handling.*
+  > *Thank you, and I look forward to your questions!"*

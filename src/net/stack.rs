@@ -1,5 +1,5 @@
 use crate::arch::pit;
-use crate::drivers::e1000::{get_mac, is_up};
+use crate::drivers::e1000::get_mac;
 use crate::net::smoltcp_adapter::E1000Device;
 use alloc::string::String;
 use alloc::vec;
@@ -41,8 +41,8 @@ pub fn now() -> Instant {
 }
 
 pub fn init() -> bool {
-    if !is_up() {
-        crate::serial_println!("[net] Network hardware not up, skipping network stack init");
+    if crate::drivers::e1000::E1000.lock().is_none() {
+        crate::serial_println!("[net] Network hardware not detected, skipping network stack init");
         return false;
     }
 
@@ -195,10 +195,9 @@ pub fn resolve_domain(name: &str) -> Option<Ipv4Address> {
         match socket.get_query_result(query_handle) {
             Ok(addrs) => {
                 for addr in addrs {
-                    if let IpAddress::Ipv4(ipv4) = addr {
-                        result_ip = Some(ipv4);
-                        break;
-                    }
+                    let IpAddress::Ipv4(ipv4) = addr;
+                    result_ip = Some(ipv4);
+                    break;
                 }
                 break;
             }
@@ -299,7 +298,7 @@ pub fn http_get(ip: Ipv4Address, port: u16, host: &str, path: &str) -> Result<St
     }
 }
 
-pub fn query_host_wifi_bridge() -> Result<String, &'static str> {
+pub fn send_host_wifi_command(cmd: &str) -> Result<String, &'static str> {
     let mut stack_lock = NET_STACK.lock();
     let stack = match *stack_lock {
         Some(ref mut s) => s,
@@ -307,18 +306,18 @@ pub fn query_host_wifi_bridge() -> Result<String, &'static str> {
     };
 
     let rx_buffer = udp::PacketBuffer::new(
-        vec![udp::PacketMetadata::EMPTY; 4],
-        vec![0; 2048],
+        vec![udp::PacketMetadata::EMPTY; 8],
+        vec![0; 4096],
     );
     let tx_buffer = udp::PacketBuffer::new(
-        vec![udp::PacketMetadata::EMPTY; 4],
-        vec![0; 2048],
+        vec![udp::PacketMetadata::EMPTY; 8],
+        vec![0; 4096],
     );
 
     let udp_socket = udp::Socket::new(rx_buffer, tx_buffer);
     let handle = stack.sockets.add(udp_socket);
 
-    let local_port = 50000 + (pit::get_ticks() % 1000) as u16;
+    let local_port = 50000 + (pit::get_ticks() % 5000) as u16;
     let bridge_host = stack.config.gateway.unwrap_or(Ipv4Address::new(10, 0, 2, 2));
     let bridge_endpoint = IpEndpoint::new(IpAddress::Ipv4(bridge_host), 18888);
 
@@ -328,19 +327,20 @@ pub fn query_host_wifi_bridge() -> Result<String, &'static str> {
             stack.sockets.remove(handle);
             return Err("UDP bind failed");
         }
-        let _ = socket.send_slice(b"SCAN", bridge_endpoint);
+        let _ = socket.send_slice(cmd.as_bytes(), bridge_endpoint);
     }
 
     let start = pit::uptime_ms();
     let mut response_str = None;
 
-    while pit::uptime_ms() - start < 1500 {
+    // Timeout: 6500ms allows Windows netsh WLAN scanning and profile connection to complete
+    while pit::uptime_ms() - start < 6500 {
         let timestamp = now();
         stack.interface.poll(timestamp, &mut stack.device, &mut stack.sockets);
 
         let socket = stack.sockets.get_mut::<udp::Socket>(handle);
         if socket.can_recv() {
-            let mut buf = [0u8; 1500];
+            let mut buf = [0u8; 4096];
             if let Ok((n, _)) = socket.recv_slice(&mut buf) {
                 if n > 0 {
                     response_str = Some(String::from_utf8_lossy(&buf[..n]).into_owned());
@@ -348,13 +348,30 @@ pub fn query_host_wifi_bridge() -> Result<String, &'static str> {
                 }
             }
         }
-        pit::sleep_ms(10);
+        pit::sleep_ms(15);
     }
 
     stack.sockets.remove(handle);
 
     match response_str {
         Some(res) => Ok(res),
-        None => Err("No response from Windows Wi-Fi Bridge (Is helper running on host?)"),
+        None => Err("No response from Windows Wi-Fi Bridge (Check that START_WIFI_HELPER is running)"),
     }
+}
+
+pub fn query_host_wifi_bridge() -> Result<String, &'static str> {
+    send_host_wifi_command("SCAN")
+}
+
+pub fn connect_host_wifi(ssid: &str, password: &str) -> Result<String, &'static str> {
+    let cmd = alloc::format!("CONNECT {}|{}", ssid, password);
+    send_host_wifi_command(&cmd)
+}
+
+pub fn disconnect_host_wifi() -> Result<String, &'static str> {
+    send_host_wifi_command("DISCONNECT")
+}
+
+pub fn status_host_wifi() -> Result<String, &'static str> {
+    send_host_wifi_command("STATUS")
 }

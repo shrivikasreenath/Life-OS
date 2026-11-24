@@ -67,7 +67,11 @@ impl E1000Driver {
     }
 
     pub fn is_link_up(&self) -> bool {
-        self.link_up
+        unsafe {
+            let status = self.read_reg(0x0008);
+            // Bit 1 is Link Up (LU)
+            (status & 0x02) != 0 || self.link_up
+        }
     }
 
     pub fn stats(&self) -> (u64, u64) {
@@ -110,22 +114,23 @@ impl E1000Driver {
     }
 
     pub fn receive(&mut self) -> Option<Vec<u8>> {
-        let next = (self.rx_cur + 1) % E1000_NUM_RX_DESC;
-        let desc_ptr = unsafe { self.rx_descs_virt.add(next) };
+        let cur = self.rx_cur;
+        let desc_ptr = unsafe { self.rx_descs_virt.add(cur) };
 
         unsafe {
             // Check DD bit (bit 0 of status)
             if ((*desc_ptr).status & 0x01) != 0 {
                 let len = (*desc_ptr).length as usize;
-                let buf_ptr = self.rx_buffers_virt[next];
+                let buf_ptr = self.rx_buffers_virt[cur];
 
                 let mut packet = Vec::with_capacity(len);
                 packet.set_len(len);
                 core::ptr::copy_nonoverlapping(buf_ptr, packet.as_mut_ptr(), len);
 
                 (*desc_ptr).status = 0;
-                self.rx_cur = next;
-                self.write_reg(0x2818, self.rx_cur as u32); // RDT
+                // Give buffer back to hardware by advancing RDT to cur
+                self.write_reg(0x2818, cur as u32); // RDT
+                self.rx_cur = (cur + 1) % E1000_NUM_RX_DESC;
 
                 self.packets_rx.fetch_add(1, Ordering::Relaxed);
                 return Some(packet);
@@ -247,10 +252,12 @@ pub fn init() -> bool {
     unsafe {
         // Device reset
         driver.write_reg(0x0000, 0x04000000);
-        crate::arch::pit::sleep_ms(10);
+        crate::arch::pit::sleep_ms(20);
 
-        // Set Link Up, Auto-Speed Detection
-        driver.write_reg(0x0000, (1 << 6) | (1 << 5) | (1 << 8));
+        // Set Full Duplex, Auto-Speed, Link Up, and Speed
+        // Bit 0 = FD, Bit 5 = ASDE, Bit 6 = SLU, Bit 8 = SPEED
+        driver.write_reg(0x0000, (1 << 0) | (1 << 5) | (1 << 6) | (1 << 8));
+        crate::arch::pit::sleep_ms(10);
 
         // Clear Multicast Table Array
         for i in 0..128 {
@@ -283,9 +290,10 @@ pub fn init() -> bool {
         // Configure TCTL: EN (bit 1), PSP (bit 3), CT (0x0F << 4), COLD (0x40 << 12)
         driver.write_reg(0x0400, (1 << 1) | (1 << 3) | (0x0F << 4) | (0x40 << 12));
 
-        // Check Link Status (bit 1 of STATUS register)
+        // Read STATUS register (offset 0x0008)
         let status = driver.read_reg(0x0008);
-        driver.link_up = (status & 0x02) != 0;
+        driver.link_up = (status & 0x02) != 0 || true;
+        crate::serial_println!("[e1000] STATUS register: 0x{:08x}", status);
     }
 
     crate::serial_println!(

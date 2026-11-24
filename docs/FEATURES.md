@@ -1,7 +1,7 @@
 # LIFE OS Feature Catalogue & User Manual
 **Author:** Shrivika  
 **Desktop Environment:** Life Desktop Compositor (1024x768x32bpp)  
-**Integrated Applications:** 8 GUI Applications + 22 CLI Commands  
+**Integrated Applications:** 8 GUI Applications + 23 CLI Commands  
 
 ---
 
@@ -10,32 +10,67 @@
 The Life OS desktop is engineered with a modern, high-contrast dark theme optimized for technical clarity and demonstration:
 
 ### Desktop Components
-1. **Procedural Wallpaper**: Dark navy/slate geometric background with anti-aliased cross-hatchings rendered in pure software.
-2. **Bottom Taskbar (36px)**:
+1. **Desktop Application Icons**:
+   - 8 major applications placed directly on the desktop with 32x32 pixel art icons and clean labels:
+     1. **Web Browser** (Globe icon)
+     2. **Terminal** (Green terminal prompt icon)
+     3. **File Manager** (Golden folder icon)
+     4. **Network Manager** (Green signal bars icon)
+     5. **Games Suite** (Purple gamepad controller icon)
+     6. **System Information** (Cyan microchip icon)
+     7. **Settings** (Slate gear/cog icon)
+     8. **Trash** (Slate wastebasket icon)
+   - Single-click to select (highlights with cyan bounding outline).
+   - Double-click to launch the application.
+   - Drag-and-drop icon movement across the desktop with session persistence and boundary clamping.
+2. **Procedural Wallpaper Engine**:
+   - 3 switchable aesthetic wallpapers (cycled via `F5` or Desktop Context Menu):
+     1. **Cyber Grid** (Default): Jet black grid with cyan coordinate lines and top branding.
+     2. **Deep Cobalt Aurora**: Deep oceanic gradient with horizontal aurora rays.
+     3. **Midnight Slate**: Obsidian gradient with subtle starfield dots.
+3. **Upgraded Taskbar (38px)**:
    - **Start Button**: Cyan-accented menu trigger with custom vector Life OS logo.
-   - **Running Task Tabs**: 140px window pills showing active/minimized status, application icons, and titles.
+   - **Pinned Quick Launch**: Browser, Terminal, File Manager, Games.
+   - **Running Task Tabs**: Window pills showing active/minimized status, application icons, titles, and active cyan underline.
    - **System Tray**:
      - Ethernet Link LED (Green = Active, Red = Disconnected).
-     - Wi-Fi signal icon.
-     - Real-Time Clock & Calendar (HH:MM:SS / YYYY-MM-DD) read directly from hardware RTC.
-3. **Start Menu**:
+     - Wi-Fi indicator + live connected SSID label (e.g. `Vedav`).
+     - Volume speaker icon with mute toggle indicator.
+     - Real-Time Clock & Date (HH:MM:SS / YYYY-MM-DD) read directly from hardware RTC.
+     - Clickable clock that opens the **Calendar Pop-up Panel**.
+4. **Calendar Pop-up Panel**:
+   - Displays real-time 24h clock, full month date, day-of-week headers (`Su Mo Tu We Th Fr Sa`), and calendar day grid with current day highlighted in vibrant cyan.
+   - Opened by clicking the taskbar clock or pressing `F2`.
+5. **Start Menu**:
    - User profile section: Avatar `S`, name `Shrivika`, handle `shrivika@life-os`.
-   - Application launcher list with pixel icons.
-   - Quick shutdown and reboot action buttons.
-4. **Window Manager**:
+   - Application launcher list with pixel icons and number shortcuts `1..8`.
+   - Power options: `Shutdown` and `Reboot` action buttons.
+   - Opened by clicking Start or pressing `F1`.
+6. **Desktop Right-Click Context Menu**:
+   - Opened by right-clicking on the desktop or pressing `F3`.
+   - Actions:
+     - `Refresh Desktop`: Deselects icons and clears stale selection states.
+     - `Change Wallpaper`: Cycles between the 3 procedural wallpaper themes.
+     - `Arrange Icons`: Re-aligns all desktop icons into an orderly grid column.
+     - `Create Folder`: Creates a new directory inside `/home/shrivika`.
+     - `Open Terminal`: Launches the terminal shell.
+     - `Display Settings`: Opens System Settings.
+     - `System Info`: Opens the System Information dashboard.
+7. **Window Manager Engine**:
    - Double-buffered compositing preventing screen tearing.
-   - Glowing cyan active window outline.
-   - Titlebar controls: Minimize (Yellow), Maximize (Cyan), Close (Red).
-   - Dynamic window dragging and Z-index depth layering.
+   - Active window glowing cyan border.
+   - Titlebar controls: Minimize (Yellow), Maximize / Restore (Cyan), Close (Red).
+   - Smooth titlebar dragging and Z-index depth layering.
 
 ---
 
 ## 2. Integrated GUI Applications
 
 ### 1. Terminal (`shrivika@life-os`)
-A full-featured terminal shell supporting 22 bare-metal commands, colored command prompts, unknown command handling, and output scrolling.
+A full-featured terminal shell supporting 23 bare-metal commands, colored command prompts, unknown command handling, and output scrolling.
 - Run `help` in terminal for the complete command list.
 - Run `whoami` to verify ownership (`shrivika`).
+- Run `wifi scan` to scan physical Wi-Fi networks via Windows Host Bridge.
 
 ### 2. Life Web Browser
 A graphical lightweight web browser designed for local documentation and intranet browsing.
@@ -44,80 +79,67 @@ A graphical lightweight web browser designed for local documentation and intrane
 - **Welcome Page**: Displays detailed technical breakdown of Life OS kernel capabilities.
 
 ### 3. File Manager (LifeFS Explorer)
-A tree-view graphical file browser for the in-memory Virtual File System.
+A tree-view graphical file browser for the in-memory Virtual File System (LifeFS).
 - Browse directories: `/home/shrivika`, `/home/shrivika/Documents`, `/home/shrivika/Projects`, `/etc`, `/system`.
-- View file metadata (name, size, type).
-- Create new text files and view file contents in real-time.
+- Toolbar buttons:
+  - `+ File` (or `n`/`f` key): Create new text file.
+  - `+ Folder` (or `d`/`m` key): Create new directory.
+  - `Delete` (or `x`/`Del` key): Remove selected file or directory.
+  - `Up ..` (or `u`/`Backspace` key): Navigate to parent folder.
+- Built-in text viewer: Opening any text file (e.g. `README.txt`, `Kernel_Architecture.txt`) presents an in-window text preview overlay with a close button (`Esc` or `q`).
+- *Note:* LifeFS is an in-memory virtual filesystem; changes persist throughout the boot session.
 
 ### 4. Network & Wi-Fi Manager
-A dual-mode network diagnostic and scanning utility.
+A dual-mode network diagnostic and real Wi-Fi management utility.
 - **Ethernet Tab**: Real-time packet RX/TX counters, MAC address, IP address, and gateway.
-- **Wi-Fi Scanner Tab**: Interacts with the Windows host bridge to display physical wireless access points, BSSIDs, signal bars, and encryption types.
+- **Wi-Fi (Host Bridge) Tab**:
+  - Connects to the Windows host bridge over UDP port 18888.
+  - Displays real physical Wi-Fi networks in the room with SSID, signal strength bar + %, band (2.4/5GHz), channel, security type, and connection state.
+  - Interactive selection row, masked password input box, `Connect` and `Disconnect` buttons.
 
 ### 5. Games Suite (4-in-1 Arcade)
 Four classic playable games running bare-metal on the kernel timer:
-1. **Snake Classic**:
-   - Arrow keys: Steer snake.
-   - `R` key: Restart game.
-   - Eat red food dots to grow and increase score.
-2. **Retro Pong**:
-   - `W` / `Up Arrow`: Move left paddle up.
-   - `S` / `Down Arrow`: Move left paddle down.
-   - AI controls the right paddle; first to 7 points wins.
-3. **Tic-Tac-Toe**:
-   - Arrow keys / numbers `1..9`: Select square.
-   - `Space` / `Enter`: Place marker (X).
-   - Smart CPU opponent places O.
-4. **2048 Puzzle**:
-   - Arrow keys: Slide tiles in 4 directions.
-   - Tiles with identical numbers merge (2+2=4, 4+4=8, ...).
+1. **Snake Classic** (`1`): Steer snake with arrow keys, eat food dots, avoid walls.
+2. **Retro Pong** (`2`): Move paddle with `W`/`S` or `Up`/`Down`, play against CPU.
+3. **Tic-Tac-Toe** (`3`): Select cell with arrow keys or `1..9`, place marker with `Space`/`Enter`.
+4. **2048 Puzzle** (`4`): Slide numbered tiles with arrow keys to combine like numbers and reach 2048.
 
-### 6. System Information
-Provides live telemetry read directly from CPU registers and memory managers:
-- Processor model, family, and hardware feature flags (TSC, MSR, SSE, etc.).
-- Total physical memory, usable RAM, and free frame counts.
-- Dynamic heap pool allocation statistics.
-- System uptime in seconds and timer ticks.
+### 6. System Information Dashboard
+Real-time hardware telemetry:
+- Operating System & Owner identity (`Shrivika`).
+- CPU architecture and enabled features.
+- Physical RAM (4102 MB total, 4074 MB usable, 4042 MB free).
+- Dynamic Kernel Heap Pool (32 MB).
+- Display framebuffer specifications (1024x768 @ 32bpp ARGB).
+- Network interface state (IPv4, MAC, Uptime ticks).
 
-### 7. System Settings
-Configuration panel for user preferences:
-- Display resolution toggle (1024x768 / 800x600).
-- Color theme options (Cyber Slate Dark, Cobalt Blue, Midnight Violet).
-- Sound and alert effects toggle.
+### 7. System Settings Panel
+System configuration controls:
+- Display resolution info.
+- Desktop theme options.
+- CMOS RTC clock status.
+- Filesystem subsystem stats.
+- System power actions (`Shutdown` and `Reboot`).
 
 ### 8. About Life OS
-A college presentation card showcasing:
-- Project Name: **LIFE OS**
-- Author: **Shrivika**
-- Department: Computer Science & Engineering
-- Core architectural achievements and ISO size benchmarks.
+College presentation showcase highlighting Shrivika's architecture, microkernel design, and technical achievements.
 
 ---
 
-## 3. Terminal Commands Reference
+## 3. Global Hotkey Reference
 
-| Command | Usage | Description |
-| :--- | :--- | :--- |
-| `help` | `help` | Prints the complete catalogue of 22 commands. |
-| `whoami` | `whoami` | Displays current active user identity (`shrivika`). |
-| `uname` | `uname` | Prints operating system and kernel version info. |
-| `clear` | `clear` | Clears all current lines from the terminal screen. |
-| `pwd` | `pwd` | Prints the present working directory. |
-| `ls` | `ls [path]` | Lists files and folders in current or specified path. |
-| `cd` | `cd <path>` | Changes working directory (`..` for parent, `~` for home). |
-| `cat` | `cat <file>` | Prints the text contents of a file to terminal. |
-| `echo` | `echo <text>` | Echoes back arbitrary text to the screen. |
-| `date` | `date` | Displays current calendar date from CMOS RTC. |
-| `time` | `time` | Displays current 24-hour time from CMOS RTC. |
-| `memory` | `memory` | Displays physical RAM, usable RAM, heap pool, and paging. |
-| `cpu` | `cpu` | Displays processor architecture, model, and CPUID features. |
-| `network` | `network` | Displays Intel 82540EM hardware MAC, link state, and packet stats. |
-| `ifconfig`| `ifconfig` | Displays IP address, netmask, gateway, and DHCP status. |
-| `ping` | `ping <ip>` | Tests network reachability with ICMP echo requests. |
-| `dns` | `dns <host>` | Queries DNS resolver for IP address of given domain. |
-| `browser` | `browser` | Launches the Life Web Browser GUI window. |
-| `games` | `games` | Launches the 4-in-1 Arcade Games Suite GUI window. |
-| `about` | `about` | Opens the About Life OS college presentation window. |
-| `version` | `version` | Displays the kernel version, compiler build, and target. |
-| `reboot` | `reboot` | Safely resets the CPU and restarts the computer. |
-| `shutdown`| `shutdown` | Powers down the system hardware. |
+| Key | Action |
+| :--- | :--- |
+| `F1` | Toggle Start Menu |
+| `F2` | Toggle Calendar Pop-up Panel |
+| `F3` | Toggle Desktop Context Menu |
+| `F4` | Close Active Window |
+| `F5` | Cycle Desktop Wallpaper Theme |
+| `F6` | Cycle Active Window Focus |
+| `F7` | Launch Games Suite |
+| `F8` | Launch Web Browser |
+| `F9` | Launch System Information |
+| `F10` | Launch System Settings |
+| `F12` | Maximize / Restore Active Window |
+| `Esc` | Close Open Menus |
+| `1..8` | Launch Corresponding App when Start Menu is open |

@@ -3,10 +3,11 @@ use crate::graphics::canvas::{draw_rect_outline, draw_text, draw_text_clipped, f
 use crate::graphics::framebuffer::Color;
 use crate::graphics::icons::{draw_icon, AppIcon};
 use crate::gui::window::Window;
-use crate::net::stack::{get_info, query_host_wifi_bridge};
+use crate::net::stack::{connect_host_wifi, disconnect_host_wifi, get_info, query_host_wifi_bridge};
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use pc_keyboard::{DecodedKey, KeyCode};
 use spin::Mutex;
 
 #[derive(Debug, Clone)]
@@ -14,15 +15,21 @@ pub struct WifiNetwork {
     pub ssid: String,
     pub signal_percent: u8,
     pub security: String,
+    pub band: String,
+    pub channel: String,
     pub is_connected: bool,
 }
 
 pub struct NetworkManagerApp {
-    active_tab: usize, // 0 = Ethernet, 1 = Wi-Fi (Host Bridge)
-    wifi_networks: Vec<WifiNetwork>,
-    selected_wifi_idx: Option<usize>,
-    scanning: bool,
-    status_msg: String,
+    pub active_tab: usize, // 0 = Ethernet, 1 = Wi-Fi (Host Bridge)
+    pub wifi_networks: Vec<WifiNetwork>,
+    pub selected_wifi_idx: Option<usize>,
+    pub scanning: bool,
+    pub status_msg: String,
+    pub password_input: String,
+    pub password_active: bool,
+    pub connecting: bool,
+    pub connected_ssid: String,
 }
 
 pub static NETWORK_MANAGER: Mutex<NetworkManagerApp> = Mutex::new(NetworkManagerApp::new());
@@ -35,6 +42,10 @@ impl NetworkManagerApp {
             selected_wifi_idx: None,
             scanning: false,
             status_msg: String::new(),
+            password_input: String::new(),
+            password_active: false,
+            connecting: false,
+            connected_ssid: String::new(),
         }
     }
 
@@ -45,17 +56,27 @@ impl NetworkManagerApp {
         match query_host_wifi_bridge() {
             Ok(response) => {
                 self.parse_wifi_response(&response);
-                self.status_msg = format!("Discovered {} physical Wi-Fi networks from host", self.wifi_networks.len());
-                crate::gui::desktop::DESKTOP.lock().wifi_bridge_connected = true;
+                self.status_msg = format!(
+                    "Discovered {} physical Wi-Fi network(s) from Windows host",
+                    self.wifi_networks.len()
+                );
+                let mut desktop = crate::gui::desktop::DESKTOP.lock();
+                desktop.wifi_bridge_connected = true;
+                if let Some(conn) = self.wifi_networks.iter().find(|n| n.is_connected) {
+                    desktop.current_wifi_ssid = conn.ssid.clone();
+                    desktop.wifi_signal = conn.signal_percent;
+                    self.connected_ssid = conn.ssid.clone();
+                }
             }
             Err(err) => {
                 self.status_msg = format!("Host Wi-Fi Bridge: {}", err);
-                // Keep existing or show informative notice
                 if self.wifi_networks.is_empty() {
                     self.wifi_networks.push(WifiNetwork {
                         ssid: "HostBridge_Waiting".to_string(),
                         signal_percent: 0,
                         security: "Launch START_WIFI_HELPER on Windows host".to_string(),
+                        band: "2.4 GHz".to_string(),
+                        channel: "-".to_string(),
                         is_connected: false,
                     });
                 }
@@ -64,9 +85,66 @@ impl NetworkManagerApp {
         self.scanning = false;
     }
 
+    pub fn connect_selected(&mut self) {
+        let idx = match self.selected_wifi_idx {
+            Some(i) if i < self.wifi_networks.len() => i,
+            _ => {
+                self.status_msg = "Please select a Wi-Fi network from the list first".to_string();
+                return;
+            }
+        };
+
+        let target_ssid = self.wifi_networks[idx].ssid.clone();
+        if target_ssid == "HostBridge_Waiting" {
+            self.status_msg = "Cannot connect to placeholder. Please run START_WIFI_HELPER on host and click Scan Now.".to_string();
+            return;
+        }
+
+        self.connecting = true;
+        self.status_msg = format!("Connecting to '{}' via Windows WLAN API...", target_ssid);
+
+        match connect_host_wifi(&target_ssid, &self.password_input) {
+            Ok(resp) => {
+                self.status_msg = resp.clone();
+                if resp.starts_with("SUCCESS") {
+                    for (i, net) in self.wifi_networks.iter_mut().enumerate() {
+                        net.is_connected = i == idx;
+                    }
+                    self.connected_ssid = target_ssid.clone();
+                    let mut desktop = crate::gui::desktop::DESKTOP.lock();
+                    desktop.wifi_bridge_connected = true;
+                    desktop.current_wifi_ssid = target_ssid;
+                }
+            }
+            Err(err) => {
+                self.status_msg = format!("Connection error: {}", err);
+            }
+        }
+        self.connecting = false;
+    }
+
+    pub fn disconnect_selected(&mut self) {
+        self.status_msg = "Disconnecting via Windows WLAN API...".to_string();
+        match disconnect_host_wifi() {
+            Ok(resp) => {
+                self.status_msg = resp;
+                for net in self.wifi_networks.iter_mut() {
+                    net.is_connected = false;
+                }
+                self.connected_ssid.clear();
+                let mut desktop = crate::gui::desktop::DESKTOP.lock();
+                desktop.current_wifi_ssid.clear();
+            }
+            Err(err) => {
+                self.status_msg = format!("Disconnect error: {}", err);
+            }
+        }
+    }
+
     fn parse_wifi_response(&mut self, data: &str) {
-        // Format expected from Windows host bridge:
-        // SSID|SIGNAL%|SECURITY|CONNECTED
+        // Format from Windows host bridge:
+        // SSID|SIGNAL%|SECURITY|BAND|CHANNEL|CONNECTED
+        // or fallback: SSID|SIGNAL%|SECURITY|CONNECTED
         self.wifi_networks.clear();
         for line in data.lines() {
             let parts: Vec<&str> = line.split('|').collect();
@@ -74,10 +152,17 @@ impl NetworkManagerApp {
                 let ssid = parts[0].trim().to_string();
                 let signal = parts[1].trim().parse::<u8>().unwrap_or(50);
                 let security = parts[2].trim().to_string();
-                let is_connected = if parts.len() >= 4 {
-                    parts[3].trim() == "1" || parts[3].trim().eq_ignore_ascii_case("true")
+
+                let (band, channel, is_connected) = if parts.len() >= 6 {
+                    let b = parts[3].trim().to_string();
+                    let ch = parts[4].trim().to_string();
+                    let conn = parts[5].trim() == "1" || parts[5].trim().eq_ignore_ascii_case("true");
+                    (b, ch, conn)
+                } else if parts.len() == 4 {
+                    let conn = parts[3].trim() == "1" || parts[3].trim().eq_ignore_ascii_case("true");
+                    ("2.4 GHz".to_string(), "6".to_string(), conn)
                 } else {
-                    false
+                    ("2.4 GHz".to_string(), "6".to_string(), false)
                 };
 
                 if !ssid.is_empty() {
@@ -85,10 +170,95 @@ impl NetworkManagerApp {
                         ssid,
                         signal_percent: signal,
                         security,
+                        band,
+                        channel,
                         is_connected,
                     });
                 }
             }
+        }
+    }
+
+    pub fn handle_key(&mut self, key: DecodedKey) {
+        if self.password_active {
+            match key {
+                DecodedKey::Unicode('\n') | DecodedKey::Unicode('\r') => {
+                    self.connect_selected();
+                }
+                DecodedKey::Unicode('\x08') | DecodedKey::RawKey(KeyCode::Backspace) => {
+                    self.password_input.pop();
+                }
+                DecodedKey::RawKey(KeyCode::Escape) => {
+                    self.password_active = false;
+                }
+                DecodedKey::Unicode(c) if !c.is_control() => {
+                    if self.password_input.len() < 64 {
+                        self.password_input.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Global keys for Network Manager when not entering password:
+        match key {
+            DecodedKey::RawKey(KeyCode::Tab) | DecodedKey::Unicode('\t') => {
+                self.active_tab = 1 - self.active_tab;
+                if self.active_tab == 1 && self.wifi_networks.is_empty() {
+                    self.scan_wifi();
+                }
+            }
+            DecodedKey::Unicode('w') | DecodedKey::Unicode('W') => {
+                self.active_tab = 1;
+                if self.wifi_networks.is_empty() {
+                    self.scan_wifi();
+                }
+            }
+            DecodedKey::Unicode('e') | DecodedKey::Unicode('E') => {
+                self.active_tab = 0;
+            }
+            DecodedKey::Unicode('s') | DecodedKey::Unicode('S') | DecodedKey::Unicode('r') | DecodedKey::Unicode('R') => {
+                if self.active_tab == 1 {
+                    self.scan_wifi();
+                }
+            }
+            DecodedKey::RawKey(KeyCode::ArrowDown) | DecodedKey::Unicode('j') => {
+                if self.active_tab == 1 && !self.wifi_networks.is_empty() {
+                    let next = match self.selected_wifi_idx {
+                        Some(i) if i + 1 < self.wifi_networks.len() => i + 1,
+                        Some(_) => 0,
+                        None => 0,
+                    };
+                    self.selected_wifi_idx = Some(next);
+                }
+            }
+            DecodedKey::RawKey(KeyCode::ArrowUp) | DecodedKey::Unicode('k') => {
+                if self.active_tab == 1 && !self.wifi_networks.is_empty() {
+                    let prev = match self.selected_wifi_idx {
+                        Some(i) if i > 0 => i - 1,
+                        Some(_) => self.wifi_networks.len().saturating_sub(1),
+                        None => 0,
+                    };
+                    self.selected_wifi_idx = Some(prev);
+                }
+            }
+            DecodedKey::Unicode('p') | DecodedKey::Unicode('P') => {
+                if self.active_tab == 1 {
+                    self.password_active = true;
+                }
+            }
+            DecodedKey::Unicode('c') | DecodedKey::Unicode('C') | DecodedKey::Unicode('\n') => {
+                if self.active_tab == 1 {
+                    self.connect_selected();
+                }
+            }
+            DecodedKey::Unicode('d') | DecodedKey::Unicode('D') => {
+                if self.active_tab == 1 {
+                    self.disconnect_selected();
+                }
+            }
+            _ => {}
         }
     }
 
@@ -97,7 +267,7 @@ impl NetworkManagerApp {
         if local_y >= 4 && local_y <= 28 {
             if local_x >= 10 && local_x <= 130 {
                 self.active_tab = 0; // Ethernet
-            } else if local_x >= 140 && local_x <= 280 {
+            } else if local_x >= 140 && local_x <= 290 {
                 self.active_tab = 1; // Wi-Fi Bridge
                 if self.wifi_networks.is_empty() {
                     self.scan_wifi();
@@ -108,21 +278,44 @@ impl NetworkManagerApp {
 
         // 2. Wi-Fi tab action buttons
         if self.active_tab == 1 {
-            // "Scan Now" button
-            if local_x >= 10 && local_x <= 90 && local_y >= 36 && local_y <= 60 {
+            // "Scan Now" button: (10..95, 36..60)
+            if local_x >= 10 && local_x <= 95 && local_y >= 36 && local_y <= 60 {
                 self.scan_wifi();
                 return;
             }
 
-            // Wi-Fi list items
-            let list_y = local_y - 70;
-            let item_h = 32;
-            if list_y >= 0 {
+            // "Connect" button: (410..480, 275..302)
+            if local_x >= 410 && local_x <= 480 && local_y >= 275 && local_y <= 305 {
+                self.connect_selected();
+                return;
+            }
+
+            // "Disconnect" button: (488..570, 275..302)
+            if local_x >= 488 && local_x <= 570 && local_y >= 275 && local_y <= 305 {
+                self.disconnect_selected();
+                return;
+            }
+
+            // Password input box: (160..395, 278..302)
+            if local_x >= 160 && local_x <= 395 && local_y >= 275 && local_y <= 305 {
+                self.password_active = true;
+                return;
+            } else {
+                self.password_active = false;
+            }
+
+            // Wi-Fi list items: (10..bw, 90..)
+            let list_y = local_y - 90;
+            let item_h = 30;
+            if list_y >= 0 && list_y < 180 {
                 let idx = (list_y / item_h) as usize;
                 if idx < self.wifi_networks.len() {
                     self.selected_wifi_idx = Some(idx);
                     let net = &self.wifi_networks[idx];
-                    self.status_msg = format!("Selected network: {} (Signal: {}%)", net.ssid, net.signal_percent);
+                    self.status_msg = format!(
+                        "Selected: '{}' (Signal: {}%, Band: {}, Security: {})",
+                        net.ssid, net.signal_percent, net.band, net.security
+                    );
                 }
             }
         }
@@ -141,13 +334,21 @@ impl NetworkManagerApp {
         fill_rect(bx, by, bw, 32, Color::rgb(30, 41, 59));
 
         // Tab 0: Virtual Ethernet
-        let eth_tab_bg = if self.active_tab == 0 { Color::rgb(6, 182, 212) } else { Color::rgb(51, 65, 85) };
+        let eth_tab_bg = if self.active_tab == 0 {
+            Color::rgb(6, 182, 212)
+        } else {
+            Color::rgb(51, 65, 85)
+        };
         fill_rect(bx + 10, by + 4, 120, 24, eth_tab_bg);
         draw_text(bx + 20, by + 8, "Ethernet (e1000)", Color::rgb(255, 255, 255), None);
 
         // Tab 1: Physical Wi-Fi Bridge
-        let wifi_tab_bg = if self.active_tab == 1 { Color::rgb(6, 182, 212) } else { Color::rgb(51, 65, 85) };
-        fill_rect(bx + 140, by + 4, 140, 24, wifi_tab_bg);
+        let wifi_tab_bg = if self.active_tab == 1 {
+            Color::rgb(6, 182, 212)
+        } else {
+            Color::rgb(51, 65, 85)
+        };
+        fill_rect(bx + 140, by + 4, 150, 24, wifi_tab_bg);
         draw_text(bx + 148, by + 8, "Wi-Fi (Host Bridge)", Color::rgb(255, 255, 255), None);
 
         let content_y = by + 36;
@@ -158,28 +359,63 @@ impl NetworkManagerApp {
             let mac = e1000::get_mac();
             let is_up = e1000::is_up();
 
-            draw_text(bx + 20, content_y + 10, "Virtual Ethernet Adapter Status", Color::rgb(245, 158, 11), None);
+            draw_text(
+                bx + 20,
+                content_y + 10,
+                "Virtual Ethernet Adapter Status (Intel e1000 NAT)",
+                Color::rgb(245, 158, 11),
+                None,
+            );
 
             let mut y = content_y + 36;
             let spacing = 22;
 
             draw_text(bx + 20, y, "Adapter Model   :", Color::rgb(148, 163, 184), None);
-            draw_text(bx + 180, y, "Intel PRO/1000 MT Desktop (82540EM)", Color::rgb(241, 245, 249), None);
+            draw_text(
+                bx + 180,
+                y,
+                "Intel PRO/1000 MT Desktop (82540EM)",
+                Color::rgb(241, 245, 249),
+                None,
+            );
             y += spacing;
 
             draw_text(bx + 20, y, "Physical MAC    :", Color::rgb(148, 163, 184), None);
-            draw_text(bx + 180, y, &format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]), Color::rgb(241, 245, 249), None);
+            draw_text(
+                bx + 180,
+                y,
+                &format!(
+                    "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+                ),
+                Color::rgb(241, 245, 249),
+                None,
+            );
             y += spacing;
 
             draw_text(bx + 20, y, "Hardware Link   :", Color::rgb(148, 163, 184), None);
-            let link_str = if is_up { "CONNECTED (1000 Mbps Full Duplex)" } else { "DISCONNECTED" };
-            let link_color = if is_up { Color::rgb(34, 197, 94) } else { Color::rgb(239, 68, 68) };
+            let link_str = if is_up {
+                "CONNECTED (1000 Mbps Full Duplex)"
+            } else {
+                "DISCONNECTED"
+            };
+            let link_color = if is_up {
+                Color::rgb(34, 197, 94)
+            } else {
+                Color::rgb(239, 68, 68)
+            };
             draw_text(bx + 180, y, link_str, link_color, None);
             y += spacing;
 
             if let Some(net) = get_info() {
                 draw_text(bx + 20, y, "Assigned IPv4   :", Color::rgb(148, 163, 184), None);
-                draw_text(bx + 180, y, &format!("{} / {}", net.ip, net.subnet_mask), Color::rgb(6, 182, 212), None);
+                draw_text(
+                    bx + 180,
+                    y,
+                    &format!("{} / {}", net.ip, net.subnet_mask),
+                    Color::rgb(6, 182, 212),
+                    None,
+                );
                 y += spacing;
 
                 draw_text(bx + 20, y, "Default Gateway :", Color::rgb(148, 163, 184), None);
@@ -188,22 +424,32 @@ impl NetworkManagerApp {
                 y += spacing;
 
                 draw_text(bx + 20, y, "DHCP Protocol   :", Color::rgb(148, 163, 184), None);
-                let dhcp_str = if net.dhcp_configured { "Active & Configured (VirtualBox NAT)" } else { "Pending discovery..." };
+                let dhcp_str = if net.dhcp_configured {
+                    "Active & Configured (VirtualBox NAT)"
+                } else {
+                    "Static / Configured via NAT fallback"
+                };
                 draw_text(bx + 180, y, dhcp_str, Color::rgb(241, 245, 249), None);
                 y += spacing;
             }
 
             draw_text(bx + 20, y, "Packets Transferred :", Color::rgb(148, 163, 184), None);
-            draw_text(bx + 180, y, &format!("RX: {} frames | TX: {} frames", rx, tx), Color::rgb(241, 245, 249), None);
+            draw_text(
+                bx + 180,
+                y,
+                &format!("RX: {} frames | TX: {} frames", rx, tx),
+                Color::rgb(241, 245, 249),
+                None,
+            );
         } else {
-            // WI-FI HOST BRIDGE
-            fill_rect(bx + 10, content_y + 4, 80, 24, Color::rgb(16, 185, 129));
-            draw_text(bx + 20, content_y + 8, "Scan Now", Color::rgb(255, 255, 255), None);
+            // WI-FI HOST BRIDGE TAB
+            fill_rect(bx + 10, content_y + 4, 85, 24, Color::rgb(16, 185, 129));
+            draw_text(bx + 18, content_y + 8, "Scan Now", Color::rgb(255, 255, 255), None);
 
             draw_text(
-                bx + 105,
+                bx + 110,
                 content_y + 8,
-                "Nearby Wi-Fi Networks (via Windows Host Bridge)",
+                "Real Physical Wi-Fi Networks (Host Bridge 10.0.2.2:18888)",
                 Color::rgb(203, 213, 225),
                 None,
             );
@@ -212,33 +458,56 @@ impl NetworkManagerApp {
             let list_y = content_y + 34;
             fill_rect(bx + 10, list_y, bw - 20, 20, Color::rgb(24, 33, 47));
             draw_text(bx + 16, list_y + 2, "SSID (Network Name)", Color::rgb(148, 163, 184), None);
-            draw_text(bx + 260, list_y + 2, "Signal", Color::rgb(148, 163, 184), None);
-            draw_text(bx + 350, list_y + 2, "Security", Color::rgb(148, 163, 184), None);
-            draw_text(bx + 450, list_y + 2, "State", Color::rgb(148, 163, 184), None);
+            draw_text(bx + 230, list_y + 2, "Signal", Color::rgb(148, 163, 184), None);
+            draw_text(bx + 310, list_y + 2, "Band / Ch", Color::rgb(148, 163, 184), None);
+            draw_text(bx + 395, list_y + 2, "Security", Color::rgb(148, 163, 184), None);
+            draw_text(bx + 485, list_y + 2, "State", Color::rgb(148, 163, 184), None);
 
-            let mut row_y = list_y + 24;
+            let mut row_y = list_y + 22;
             for (i, net) in self.wifi_networks.iter().enumerate() {
-                if row_y + 28 > by + bh as i32 - 24 {
+                if row_y + 26 > content_y + 220 {
                     break;
                 }
 
                 let is_sel = self.selected_wifi_idx == Some(i);
                 if is_sel {
-                    fill_rect(bx + 10, row_y, bw - 20, 28, Color::rgb(30, 41, 59));
-                    draw_rect_outline(bx + 10, row_y, bw - 20, 28, 1, Color::rgb(6, 182, 212));
+                    fill_rect(bx + 10, row_y, bw - 20, 26, Color::rgb(30, 41, 59));
+                    draw_rect_outline(bx + 10, row_y, bw - 20, 26, 1, Color::rgb(6, 182, 212));
                 }
 
-                draw_icon(bx + 16, row_y + 6, AppIcon::Network);
-                draw_text_clipped(bx + 38, row_y + 6, 210, &net.ssid, Color::rgb(255, 255, 255), None);
+                draw_icon(bx + 16, row_y + 5, AppIcon::Network);
+                draw_text_clipped(
+                    bx + 36,
+                    row_y + 5,
+                    190,
+                    &net.ssid,
+                    Color::rgb(255, 255, 255),
+                    None,
+                );
 
-                // Signal meter bars
-                let meter_w = (net.signal_percent as u32 * 60) / 100;
-                fill_rect(bx + 260, row_y + 8, 60, 10, Color::rgb(51, 65, 85));
-                fill_rect(bx + 260, row_y + 8, meter_w, 10, Color::rgb(16, 185, 129));
-                draw_text(bx + 324, row_y + 6, &format!("{}%", net.signal_percent), Color::rgb(148, 163, 184), None);
+                // Signal bar
+                let meter_w = (net.signal_percent as u32 * 50) / 100;
+                fill_rect(bx + 230, row_y + 8, 50, 8, Color::rgb(51, 65, 85));
+                fill_rect(bx + 230, row_y + 8, meter_w, 8, Color::rgb(16, 185, 129));
+                draw_text(
+                    bx + 284,
+                    row_y + 5,
+                    &format!("{}%", net.signal_percent),
+                    Color::rgb(148, 163, 184),
+                    None,
+                );
+
+                // Band & Channel
+                draw_text(
+                    bx + 310,
+                    row_y + 5,
+                    &format!("{} (ch{})", net.band, net.channel),
+                    Color::rgb(203, 213, 225),
+                    None,
+                );
 
                 // Security
-                draw_text_clipped(bx + 350, row_y + 6, 90, &net.security, Color::rgb(203, 213, 225), None);
+                draw_text_clipped(bx + 395, row_y + 5, 85, &net.security, Color::rgb(203, 213, 225), None);
 
                 // State
                 let (st_str, st_color) = if net.is_connected {
@@ -246,20 +515,66 @@ impl NetworkManagerApp {
                 } else {
                     ("Available", Color::rgb(148, 163, 184))
                 };
-                draw_text(bx + 450, row_y + 6, st_str, st_color, None);
+                draw_text(bx + 485, row_y + 5, st_str, st_color, None);
 
-                row_y += 30;
+                row_y += 28;
             }
+
+            // Connection Box Area
+            let conn_y = content_y + 232;
+            fill_rect(bx + 10, conn_y, bw - 20, 48, Color::rgb(24, 33, 47));
+            draw_rect_outline(bx + 10, conn_y, bw - 20, 48, 1, Color::rgb(51, 65, 85));
+
+            let sel_name = match self.selected_wifi_idx {
+                Some(i) if i < self.wifi_networks.len() => &self.wifi_networks[i].ssid[..],
+                _ => "(No network selected)",
+            };
+            draw_text(bx + 16, conn_y + 6, &format!("Selected: {}", sel_name), Color::rgb(241, 245, 249), None);
+
+            draw_text(bx + 16, conn_y + 26, "Password:", Color::rgb(148, 163, 184), None);
+            
+            // Password input box
+            let pwd_box_bg = if self.password_active {
+                Color::rgb(15, 23, 42)
+            } else {
+                Color::rgb(30, 41, 59)
+            };
+            fill_rect(bx + 90, conn_y + 22, 220, 20, pwd_box_bg);
+            let pwd_border = if self.password_active {
+                Color::rgb(6, 182, 212)
+            } else {
+                Color::rgb(71, 85, 105)
+            };
+            draw_rect_outline(bx + 90, conn_y + 22, 220, 20, 1, pwd_border);
+
+            // Render masked password
+            let masked: String = self.password_input.chars().map(|_| '*').collect();
+            let cursor = if self.password_active { "_" } else { "" };
+            draw_text(
+                bx + 95,
+                conn_y + 24,
+                &format!("{}{}", masked, cursor),
+                Color::rgb(255, 255, 255),
+                None,
+            );
+
+            // Connect button
+            fill_rect(bx + 325, conn_y + 20, 80, 24, Color::rgb(16, 185, 129));
+            draw_text(bx + 342, conn_y + 24, "Connect", Color::rgb(255, 255, 255), None);
+
+            // Disconnect button
+            fill_rect(bx + 415, conn_y + 20, 95, 24, Color::rgb(239, 68, 68));
+            draw_text(bx + 426, conn_y + 24, "Disconnect", Color::rgb(255, 255, 255), None);
         }
 
         // Status bar at bottom
-        let status_y = by + bh as i32 - 20;
-        fill_rect(bx, status_y, bw, 20, Color::rgb(30, 41, 59));
+        let status_y = by + bh as i32 - 22;
+        fill_rect(bx, status_y, bw, 22, Color::rgb(30, 41, 59));
         let status = if self.status_msg.is_empty() {
-            "Ready. Note: VirtualBox provides NAT Ethernet; Host Bridge scans physical laptop Wi-Fi.".to_string()
+            "Ready. Host Bridge provides real physical Wi-Fi scanning & connection.".to_string()
         } else {
             self.status_msg.clone()
         };
-        draw_text_clipped(bx + 8, status_y + 2, bw - 16, &status, Color::rgb(148, 163, 184), None);
+        draw_text_clipped(bx + 8, status_y + 4, bw - 16, &status, Color::rgb(148, 163, 184), None);
     }
 }

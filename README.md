@@ -4,13 +4,13 @@
 **Project:** College Final Year Engineering Project  
 **Architecture:** x86_64 (Bare-Metal, `no_std`, `no_main`)  
 **Language:** 100% Rust  
-**Final Bootable ISO Size:** **3.41 MB** (3,579,904 bytes) — *Strictly below the 100 MB requirement!*
+**Final Bootable ISO Size:** **3.52 MB** (3,690,496 bytes) — *Strictly below the 100 MB requirement!*
 
 ---
 
 ## 🚀 Overview
 
-**LIFE OS** is a modern, bare-metal operating system engineered completely from scratch in Rust without any runtime dependency on Linux, Windows, or standard C runtime libraries. Developed autonomously for **Shrivika's** college computer science & engineering demonstration, Life OS combines high-performance low-level systems programming with a polished graphical desktop user experience.
+**LIFE OS** is a modern, bare-metal operating system engineered completely from scratch in Rust without any runtime dependency on Linux, Windows, or standard C runtime libraries. Developed autonomously for **Shrivika's** college computer science & engineering demonstration, Life OS combines high-performance low-level systems programming with a polished graphical desktop user experience and genuine Wi-Fi connectivity through an integrated host bridge.
 
 ### Key Identity Requirements
 - **OS Name:** Life OS
@@ -25,15 +25,28 @@
 
 | Feature | Screenshot | Description |
 | :--- | :--- | :--- |
-| **Desktop & Terminal** | ![Desktop](docs/screenshots/life_os_whoami_result.png) | Dark cyber theme, taskbar, start menu, live clock/RTC, `whoami` returning `shrivika` |
-| **All 22 Commands** | ![Help](docs/screenshots/life_os_help_result.png) | Interactive terminal shell with 22 fully implemented commands |
-| **Memory Hardware** | ![Memory](docs/screenshots/life_os_memory_result.png) | Genuine hardware memory stats: 4102 MB RAM, 32 MB heap pool, 4-level paging |
-| **File System (LifeFS)**| ![Cat](docs/screenshots/life_os_cat_content.png) | In-memory VFS reading `/home/shrivika/README.txt` |
-| **Life Web Browser** | ![Browser](docs/screenshots/life_os_browser_launched.png) | Graphical browser with navigation bar, tabs, and `life://welcome` |
-| **Games: Snake** | ![Snake](docs/screenshots/life_os_games_launched.png) | Real-time Snake arcade game with live scoring and controls |
-| **Games: Retro Pong** | ![Pong](docs/screenshots/life_os_pong_result.png) | 2-player/AI arcade Pong with collision physics and score counter |
-| **Games: Tic-Tac-Toe** | ![TicTacToe](docs/screenshots/life_os_tictactoe_result.png) | Interactive 3x3 strategy game with win/draw tracking |
-| **Games: 2048** | ![2048](docs/screenshots/life_os_2048_result.png) | Full 4x4 sliding puzzle game with tile-combining mechanics |
+| **Complete Graphical Desktop** | ![Desktop](docs/screenshots/life_os_desktop_upgraded.png) | 8 desktop icons with 32x32 pixel art, taskbar with pinned quick-launch apps, system tray with ETH LED & live Wi-Fi SSID |
+| **Terminal & Identity** | ![Terminal](docs/screenshots/life_os_whoami_upgraded.png) | Interactive shell with cyan border, `whoami` returning `shrivika` |
+| **Start Menu Launcher** | ![Start Menu](docs/screenshots/life_os_start_menu.png) | Start menu with Shrivika user avatar, 8 app shortcuts (hotkeys 1-8), and power controls |
+| **Calendar Pop-up Panel** | ![Calendar](docs/screenshots/life_os_calendar.png) | Full calendar grid with current date highlighted, opened via tray clock or `F2` |
+| **Desktop Context Menu** | ![Context Menu](docs/screenshots/life_os_context_menu.png) | Right-click context menu (Refresh, Change Wallpaper, Arrange Icons, Create Folder, Open Terminal, Settings, SysInfo) |
+| **Cycled Desktop Wallpaper** | ![Wallpaper](docs/screenshots/life_os_wallpaper_theme.png) | Deep Cobalt Aurora theme (3 selectable wallpapers switchable on the fly via `F5`) |
+| **Network & Wi-Fi Manager** | ![Wi-Fi Manager](docs/screenshots/life_os_wifi_manager.png) | Discovered real physical Wi-Fi network `Vedav's Iphone` (94% signal, WPA2, 2.4 GHz ch6, Connected) |
+| **Wi-Fi Network Selection** | ![Wi-Fi Selected](docs/screenshots/life_os_wifi_selected.png) | Wi-Fi network selection row, masked password input box, Connect and Disconnect buttons |
+| **Terminal Wi-Fi Scanner** | ![Wi-Fi Scan](docs/screenshots/life_os_wifi_scan_cli.png) | Terminal command `wifi scan` discovering real laptop physical Wi-Fi networks |
+| **Terminal Wi-Fi Status** | ![Wi-Fi Status](docs/screenshots/life_os_wifi_status_cli.png) | Terminal command `wifi status` querying live connection state from Windows WLAN API |
+| **Terminal Wi-Fi Connect** | ![Wi-Fi Connect](docs/screenshots/life_os_wifi_connect_cli.png) | Terminal command `wifi connect` verifying live connection attempt over UDP bridge |
+| **File Manager (LifeFS)** | ![File Manager](docs/screenshots/life_os_file_manager.png) | Graphical explorer with toolbar (+File, +Folder, Delete, Up ..), breadcrumb path, and file list |
+| **File Manager File Creation**| ![File Created](docs/screenshots/life_os_file_created.png) | Real-time creation of files and folders inside in-memory virtual filesystem |
+| **File Manager Text Viewer** | ![File Preview](docs/screenshots/life_os_file_preview.png) | Built-in text file preview overlay reading `Kernel_Architecture.txt` |
+| **Life Web Browser** | ![Browser](docs/screenshots/life_os_browser.png) | Web browser with navigation buttons (`<`, `>`, `R`, `H`), URL input, and `life://welcome` page |
+| **System Information** | ![SysInfo](docs/screenshots/life_os_sysinfo.png) | Hardware telemetry: 4102 MB RAM, 32 MB heap pool, x86_64 CPU features, uptime ticks |
+| **System Settings** | ![Settings](docs/screenshots/life_os_settings.png) | System settings panel with theme controls, RTC timezone, and power buttons |
+| **Maximized Window** | ![Maximized](docs/screenshots/life_os_settings_maximized.png) | Window management: full maximize/restore above taskbar (`F12`) |
+| **Games: Snake Classic** | ![Snake](docs/screenshots/life_os_games_snake.png) | Real-time Snake arcade game with live scoring and food collection |
+| **Games: Retro Pong** | ![Pong](docs/screenshots/life_os_games_pong.png) | 2-player/AI arcade Pong with collision physics and score counter |
+| **Games: Tic-Tac-Toe** | ![TicTacToe](docs/screenshots/life_os_games_tictactoe.png) | Interactive 3x3 strategy game with win/draw tracking |
+| **Games: 2048 Puzzle** | ![2048](docs/screenshots/life_os_games_2048.png) | Full 4x4 sliding puzzle game with tile-combining mechanics |
 
 ---
 
@@ -61,32 +74,51 @@
 - **PCI Bus Enumerator**: Comprehensive configuration space scanner detecting vendor, device, class, and MMIO BARs.
 - **Intel 82540EM (e1000) Gigabit NIC Driver**: Complete hardware driver featuring 32-entry circular RX/TX DMA descriptor rings, status polling, and automatic link detection.
 
-### 3. Genuine TCP/IP Networking & Host Wi-Fi Bridge
-- **smoltcp Integration**: Real packet transmission engine handling:
-  - Ethernet layer framing
-  - ARP request/reply address resolution
-  - IPv4 packet routing
-  - ICMP echo request/reply (`ping`)
-  - UDP packet transmission and DNS domain queries
-  - TCP socket stream management and HTTP client
-- **Windows Host Wi-Fi Bridge**:
-  - VirtualBox natively exposes an Intel Ethernet adapter (not physical host Wi-Fi).
-  - A lightweight host helper (`host_bridge/WiFiBridge.ps1` / `START_WIFI_HELPER.bat`) bridges physical Wi-Fi SSIDs and signal strength to Life OS via UDP port 18888.
+### 3. Real Wi-Fi Discovery & Connection (Windows Host Bridge)
+- **Virtual Hypervisor Challenge**: VirtualBox and QEMU do not expose host 802.11 physical Wi-Fi radios directly to virtual machines; they expose virtual Ethernet adapters (Intel e1000).
+- **The Bridge Architecture**: A background Windows host helper (`host_bridge/WiFiBridge.ps1` / `START_WIFI_HELPER.bat`) queries the laptop's physical Wi-Fi adapter via Windows Native WLAN APIs (`netsh wlan show networks mode=bssid` and `netsh wlan show interfaces`).
+- **UDP Inter-Process Protocol**:
+  - Life OS sends scan/connect queries from guest `10.0.2.15` to host loopback `10.0.2.2:18888`.
+  - Windows host replies with actual physical SSIDs, signal percentage, authentication type, band, and channel.
+  - Real Wi-Fi connection handling: Life OS passes selected SSID and WPA2 key to host bridge, which creates a temporary profile and establishes connection via `netsh wlan connect`.
+- **VirtualBox NAT Routing Requirement**:
+  - VirtualBox NAT drops guest packets to host loopback by default. Life OS requires:
+    ```powershell
+    VBoxManage modifyvm "Life OS" --nat-localhostreachable1 on
+    ```
+- **Live Terminal & GUI Control**:
+  - GUI: `Network & Wi-Fi Manager` with tabs, real network table, signal bars, and password box.
+  - CLI: `wifi scan`, `wifi status`, `wifi connect <SSID> [password]`, `wifi disconnect`.
+  - System Tray: Dynamic tray indicator displaying real connected SSID (e.g. `Vedav`) and signal bars.
 
 ### 4. Professional Graphical Desktop & Window Compositor
 - **Linear Framebuffer**: 1024x768 @ 32 bpp truecolor rendering with software double-buffering.
-- **Modern Dark Theme**: Slate cyber aesthetic, rounded window headers, custom icons, and typography.
-- **Window Management Engine**: Multi-window compositing supporting titlebar drag, minimize to taskbar, maximize, close, and Z-index depth sorting.
-- **Start Menu & Taskbar**: Windows-style taskbar with quick launcher, running window tabs, ETH status pill, Wi-Fi indicator, and RTC clock.
-- **8 Integrated Applications**:
-  1. **Terminal**: 22 functional commands with colored text and output scrolling.
-  2. **Browser**: Graphical web browser with navigation toolbar, address bar, and HTML/text rendering.
-  3. **File Manager**: Graphical tree and file browser for LifeFS.
-  4. **Network Manager**: Real-time packet RX/TX monitor, IP/MAC status, and host Wi-Fi scanner.
-  5. **Games Suite**: 4 fully playable arcade classics (Snake, Pong, Tic-Tac-Toe, 2048).
-  6. **System Information**: Live CPU, memory, uptime, and display hardware telemetry.
-  7. **Settings**: Resolution, dark theme, and sound settings panel.
-  8. **About Life OS**: Presentation showcase highlighting Shrivika's project achievements.
+- **8 Desktop Application Icons**: Web Browser, Terminal, File Manager, Network Manager, Games, System Info, Settings, Trash with 32x32 pixel art, single-click selection, double-click launch, and dragging.
+- **Upgraded Taskbar**:
+  - Life OS Start button.
+  - Pinned quick-launch icons (Browser, Terminal, File Manager, Games).
+  - Running window tabs with cyan active underline.
+  - System tray with Ethernet LED, Wi-Fi SSID label, volume toggle, and real-time clock/date.
+  - Clickable clock opening the calendar pop-up panel.
+- **Desktop Right-Click Context Menu**: Refresh Desktop, Change Wallpaper, Arrange Icons, Create Folder, Open Terminal, Display Settings, System Info.
+- **3 Selectable Wallpapers**: Cyber Grid (Default), Deep Cobalt Aurora, Midnight Slate (cycled via `F5` or context menu).
+- **File Manager (LifeFS Explorer)**:
+  - In-memory Virtual File System (LifeFS) rooted at `/home/shrivika`.
+  - Folder navigation, file creation (`+ File`), folder creation (`+ Folder`), deletion, and built-in text preview overlay.
+- **Comprehensive Hotkey Suite**:
+  - `F1`: Toggle Start Menu
+  - `F2`: Toggle Calendar Pop-up Panel
+  - `F3`: Toggle Desktop Context Menu
+  - `F4`: Close Active Window
+  - `F5`: Cycle Desktop Wallpaper
+  - `F6`: Cycle Active Window Focus
+  - `F7`: Launch Games Suite
+  - `F8`: Launch Web Browser
+  - `F9`: Launch System Information
+  - `F10`: Launch System Settings
+  - `F12`: Maximize / Restore Active Window
+  - `Esc`: Close Open Menus
+  - `1..8`: Instant App Launch from Start Menu
 
 ---
 
@@ -94,73 +126,39 @@
 
 | Metric | Requirement | Measured Value | Status |
 | :--- | :--- | :--- | :--- |
-| **ISO Size** | Strictly < 100 MB | **3.41 MB** (3,579,904 bytes) | ✅ **PASS (96.6% below limit)** |
-| **Kernel Binary** | Standalone ELF | **1.82 MB** (release mode) | ✅ **PASS** |
+| **ISO Size** | Strictly < 100 MB | **3.52 MB** (3,690,496 bytes) | ✅ **PASS (96.5% below limit)** |
+| **Kernel Binary** | Standalone ELF | **1.83 MB** (release mode) | ✅ **PASS** |
 | **Boot Time** | Fast boot | **< 2 seconds** to desktop GUI | ✅ **PASS** |
 
 ---
 
-## 💻 Quick Start & Running
+## 🛠️ Quick Start & Build Instructions
 
-### Prerequisites
-- **Oracle VirtualBox** (Version 7.0 or newer recommended) or **QEMU** (`qemu-system-x86_64`)
-- **Windows 11** with WSL2 (for building from source)
-
-### Running Pre-Built ISO in VirtualBox
-1. Launch **Oracle VirtualBox**.
-2. Create a new Virtual Machine:
-   - **Name:** `Life OS`
-   - **Type:** `Other` -> `Other/Unknown (64-bit)`
-   - **Base Memory:** `4096 MB` (2048 MB minimum)
-   - **Processors:** `2 CPUs`
-3. In **Settings -> System -> Motherboard**:
-   - Enable **EFI (special OSes only)** (Firmware: `EFI64`).
-4. In **Settings -> Display**:
-   - Set **Video Memory** to `128 MB`.
-   - Set **Graphics Controller** to `VBoxSVGA` or `VMSVGA`.
-5. In **Settings -> Storage**:
-   - Attach `build/LifeOS.iso` (or `C:\Users\USER\Downloads\LifeOS.iso`) to the Optical Drive.
-6. In **Settings -> Network**:
-   - Adapter 1: Attached to **NAT**.
-   - Adapter Type: **Intel PRO/1000 MT Desktop (82540EM)**.
-7. Click **Start** to boot directly into Life OS!
-
-*(For full step-by-step instructions with troubleshooting, see [docs/VIRTUALBOX_GUIDE.md](docs/VIRTUALBOX_GUIDE.md)).*
-
----
-
-## 🛠️ Building from Source
-
-In WSL2 Ubuntu:
+### 1. Build the ISO (under WSL2 Ubuntu)
 ```bash
-# Clone the repository
-git clone https://github.com/shrivika/life-os.git
-cd life-os
-
-# Ensure Rust nightly toolchain is active
-rustup default nightly
-
-# Compile the kernel and generate the bootable ISO
-chmod +x build.sh
+cd /home/vedav/life-os
 ./build.sh
 ```
-The output bootable ISO will be placed at `build/LifeOS.iso`.
+
+### 2. Configure VirtualBox VM
+```powershell
+# Create VM and configure NAT host access
+& 'C:\Program Files\Oracle\VirtualBox\VBoxManage.exe' modifyvm "Life OS" --nat-localhostreachable1 on
+```
+
+### 3. Launch Windows Wi-Fi Bridge Helper
+Double click `host_bridge/START_WIFI_HELPER.bat` or run:
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File "host_bridge\WiFiBridge.ps1"
+```
+
+### 4. Boot in VirtualBox
+Start the VM `"Life OS"`. The operating system boots directly to the graphical desktop in under two seconds!
 
 ---
 
-## 📚 Complete Documentation Suite
-
-- [Architecture Guide](docs/ARCHITECTURE.md) — Subsystem architectural breakdown, memory layout, and driver internals.
-- [Build Instructions](docs/BUILD.md) — Comprehensive compilation and toolchain requirements.
-- [VirtualBox Setup Guide](docs/VIRTUALBOX_GUIDE.md) — Complete VirtualBox VM configuration manual.
-- [Networking & Wi-Fi Bridge Guide](docs/NETWORKING.md) — Intel e1000 driver and Windows host Wi-Fi scanner guide.
-- [Testing & Quality Assurance](docs/TESTING.md) — Test matrix across VirtualBox and QEMU.
-- [Features Catalogue](docs/FEATURES.md) — Detailed guide to all 8 applications and 22 terminal commands.
-- [College Presentation & Demo Guide](docs/DEMO_GUIDE.md) — Step-by-step walkthrough script for Shrivika's project demo.
-- [GitHub Setup Instructions](docs/GITHUB_SETUP.md) — Safe repository setup instructions for Shrivika.
-
----
-
-## 📄 License & Attribution
-- **Author & Copyright:** Shrivika © 2026. All rights reserved.
-- Developed as an independent academic engineering project for Department of Computer Science & Engineering.
+## 👤 Project Ownership
+**Student Developer:** Shrivika  
+**Institution:** College Final Year Engineering Project  
+**Repository Branch:** `main`  
+**License:** MIT License  

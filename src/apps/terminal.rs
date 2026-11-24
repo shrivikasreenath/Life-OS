@@ -119,6 +119,7 @@ impl TerminalApp {
                 self.lines.push("  cpu        - Display processor information".to_string());
                 self.lines.push("  network    - Display network adapter and packet stats".to_string());
                 self.lines.push("  ifconfig   - Display IP address, netmask, and gateway".to_string());
+                self.lines.push("  wifi       - Scan, connect, and manage host bridge Wi-Fi networks".to_string());
                 self.lines.push("  ping <ip>  - Test network connectivity".to_string());
                 self.lines.push("  dns <host> - Query DNS for IP resolution".to_string());
                 self.lines.push("  browser    - Open Life Web Browser".to_string());
@@ -288,6 +289,66 @@ impl TerminalApp {
             }
             "about" => {
                 crate::gui::desktop::DESKTOP.lock().open_app(crate::gui::window::AppId::About);
+            }
+            "wifi" => {
+                let subcmd = if args.is_empty() { "scan" } else { args[0] };
+                match subcmd {
+                    "scan" | "list" => {
+                        self.lines.push("Scanning physical Wi-Fi networks via Windows Host Bridge (10.0.2.2:18888)...".to_string());
+                        let mut netmgr = crate::apps::network_manager::NETWORK_MANAGER.lock();
+                        netmgr.scan_wifi();
+                        let count = netmgr.wifi_networks.len();
+                        self.lines.push(format!("Found {} physical Wi-Fi network(s):", count));
+                        for net in &netmgr.wifi_networks {
+                            let status = if net.is_connected { " [CONNECTED]" } else { "" };
+                            self.lines.push(format!("  • {:<20} {:>3}%  {:<12} {} ch{}{}", net.ssid, net.signal_percent, net.security, net.band, net.channel, status));
+                        }
+                    }
+                    "status" => {
+                        self.lines.push("Querying Windows Host Wi-Fi status...".to_string());
+                        match crate::net::stack::status_host_wifi() {
+                            Ok(resp) => {
+                                for line in resp.lines() {
+                                    self.lines.push(format!("  {}", line));
+                                }
+                            }
+                            Err(e) => {
+                                self.lines.push(format!("Wi-Fi status error: {}", e));
+                            }
+                        }
+                    }
+                    "connect" => {
+                        if args.len() < 2 {
+                            self.lines.push("Usage: wifi connect <SSID> [password]".to_string());
+                        } else {
+                            let ssid = args[1];
+                            let password = if args.len() >= 3 { args[2] } else { "" };
+                            self.lines.push(format!("Connecting to '{}' via Windows Host Bridge...", ssid));
+                            match crate::net::stack::connect_host_wifi(ssid, password) {
+                                Ok(resp) => {
+                                    self.lines.push(format!("Response: {}", resp));
+                                }
+                                Err(e) => {
+                                    self.lines.push(format!("Connect error: {}", e));
+                                }
+                            }
+                        }
+                    }
+                    "disconnect" => {
+                        self.lines.push("Disconnecting Wi-Fi via Windows Host Bridge...".to_string());
+                        match crate::net::stack::disconnect_host_wifi() {
+                            Ok(resp) => {
+                                self.lines.push(format!("Response: {}", resp));
+                            }
+                            Err(e) => {
+                                self.lines.push(format!("Disconnect error: {}", e));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.lines.push("Usage: wifi [scan|status|connect <SSID> <pwd>|disconnect]".to_string());
+                    }
+                }
             }
             "version" => {
                 self.lines.push("Life OS Kernel 1.0.0-release (x86_64-unknown-none)".to_string());

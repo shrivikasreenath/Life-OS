@@ -88,7 +88,6 @@ impl Game2048 {
     }
 
     fn slide_row_left(&mut self, row: &mut [u32; 4]) -> bool {
-        let mut changed = false;
         let original = *row;
 
         // 1. Shift non-zeros left
@@ -125,8 +124,7 @@ impl Game2048 {
         }
 
         *row = merged;
-        changed = *row != original;
-        changed
+        *row != original
     }
 
     fn slide_left(&mut self) -> bool {

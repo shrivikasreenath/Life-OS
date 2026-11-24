@@ -98,6 +98,93 @@ impl FileManagerApp {
         }
     }
 
+    pub fn handle_key(&mut self, key: pc_keyboard::DecodedKey) {
+        use pc_keyboard::KeyCode;
+        if self.viewing_file.is_some() {
+            match key {
+                pc_keyboard::DecodedKey::RawKey(KeyCode::Escape)
+                | pc_keyboard::DecodedKey::Unicode('\x1b')
+                | pc_keyboard::DecodedKey::Unicode('q') => {
+                    self.viewing_file = None;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match key {
+            pc_keyboard::DecodedKey::RawKey(KeyCode::ArrowDown) | pc_keyboard::DecodedKey::Unicode('j') => {
+                let items = VFS.lock().ls(None);
+                if !items.is_empty() {
+                    let next = match self.selected_index {
+                        Some(i) if i + 1 < items.len() => i + 1,
+                        Some(_) => 0,
+                        None => 0,
+                    };
+                    self.selected_index = Some(next);
+                    self.status_msg = format!("Selected: {}", items[next].0);
+                }
+            }
+            pc_keyboard::DecodedKey::RawKey(KeyCode::ArrowUp) | pc_keyboard::DecodedKey::Unicode('k') => {
+                let items = VFS.lock().ls(None);
+                if !items.is_empty() {
+                    let prev = match self.selected_index {
+                        Some(i) if i > 0 => i - 1,
+                        Some(_) => items.len().saturating_sub(1),
+                        None => 0,
+                    };
+                    self.selected_index = Some(prev);
+                    self.status_msg = format!("Selected: {}", items[prev].0);
+                }
+            }
+            pc_keyboard::DecodedKey::Unicode('\n') | pc_keyboard::DecodedKey::Unicode('\r') => {
+                if let Some(idx) = self.selected_index {
+                    let items = VFS.lock().ls(None);
+                    if idx < items.len() {
+                        let (name, is_dir, _) = &items[idx];
+                        if *is_dir {
+                            VFS.lock().cd(name);
+                            self.selected_index = None;
+                        } else {
+                            if let Some(content) = VFS.lock().read_file(name) {
+                                self.viewing_file = Some((name.clone(), content));
+                            }
+                        }
+                    }
+                }
+            }
+            pc_keyboard::DecodedKey::Unicode('u') | pc_keyboard::DecodedKey::RawKey(KeyCode::Backspace) => {
+                VFS.lock().cd("..");
+                self.selected_index = None;
+                self.viewing_file = None;
+            }
+            pc_keyboard::DecodedKey::Unicode('n') | pc_keyboard::DecodedKey::Unicode('f') => {
+                let count = VFS.lock().ls(None).len();
+                let fname = format!("note_{}.txt", count + 1);
+                VFS.lock().create_file(&fname, b"Created inside Life OS File Manager.\n");
+                self.status_msg = format!("Created {}", fname);
+            }
+            pc_keyboard::DecodedKey::Unicode('d') | pc_keyboard::DecodedKey::Unicode('m') => {
+                let count = VFS.lock().ls(None).len();
+                let dname = format!("folder_{}", count + 1);
+                VFS.lock().create_dir(&dname);
+                self.status_msg = format!("Created folder {}", dname);
+            }
+            pc_keyboard::DecodedKey::Unicode('x') | pc_keyboard::DecodedKey::RawKey(KeyCode::Delete) => {
+                if let Some(idx) = self.selected_index {
+                    let items = VFS.lock().ls(None);
+                    if idx < items.len() {
+                        let name = &items[idx].0;
+                        VFS.lock().delete(name);
+                        self.status_msg = format!("Deleted {}", name);
+                        self.selected_index = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn render(&self, win: &Window) {
         let bx = win.body_x();
         let by = win.body_y();

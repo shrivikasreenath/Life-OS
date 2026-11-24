@@ -2,13 +2,13 @@
 **Author:** Shrivika  
 **NIC Driver:** Intel 82540EM (e1000) Gigabit Controller  
 **TCP/IP Engine:** `smoltcp` Bare-Metal Network Stack  
-**Host Integration:** Windows Host Wi-Fi Bridge (`WiFiBridge.ps1`)  
+**Host Integration:** Windows Host Wi-Fi Bridge (`host_bridge/WiFiBridge.ps1`)  
 
 ---
 
 ## 1. Network Architecture Overview
 
-Life OS solves one of the hardest problems in bare-metal hypervisor operating systems: **genuine dual-mode internet and Wi-Fi connectivity**.
+Life OS solves one of the hardest problems in bare-metal hypervisor operating systems: **genuine dual-mode internet and physical Wi-Fi connectivity**.
 
 ```
 +-----------------------------------------------------------------------------------------+
@@ -20,26 +20,27 @@ Life OS solves one of the hardest problems in bare-metal hypervisor operating sy
 |                 v                                                 v                     |
 |  +-----------------------------+               +--------------------------------------+ |
 |  | smoltcp TCP/IP Stack        |               | Host Bridge UDP Client               | |
-|  | - DHCP Client (Auto-Config) |               | - Broadcasts queries to Host:18888   | |
-|  | - ARP Cache & Address Resol |               | - Receives live Wi-Fi SSID lists     | |
-|  | - IPv4 / ICMP Ping / DNS    |               | - Parses RSSI dBm & Auth protocols   | |
+|  | - DHCP Client (Auto-Config) |               | - Queries Host Loopback: 10.0.2.2    | |
+|  | - ARP Cache & Address Resol |               | - Commands: SCAN, CONNECT, STATUS    | |
+|  | - IPv4 / ICMP Ping / DNS    |               | - UDP Socket Port 18888              | |
 |  | - TCP Sockets (HTTP Client) |               +------------------+-------------------+ |
 |  +--------------+--------------+                                  |                     |
 |                 |                                                 |                     |
 |                 v                                                 |                     |
 |  +----------------------------------------------------------------+------------------+  |
 |  |             Intel 82540EM (e1000) Gigabit Controller Driver                       |  |
-|  |             - 32-entry circular RX/TX DMA rings (2KB buffers)                     |  |
-|  |             - MMIO BAR0 register operations (CTRL, RCTL, TCTL)                    |  |
+|  |             - 32-entry circular RX/TX DMA rings (2KB physical buffers)            |  |
+|  |             - MMIO BAR0 register operations (CTRL, RCTL, TCTL, STATUS)            |  |
 |  +-----------------------------------------------------------------------------------+  |
 +--------------------------------------------|--------------------------------------------+
                                              | Virtual Ethernet Frames
                                              v
 +-----------------------------------------------------------------------------------------+
 |                                ORACLE VIRTUALBOX NAT                                    |
-|                       Virtual Switch Gateway: 10.0.2.2 / 10.0.2.3                       |
+|              Virtual Switch Gateway: 10.0.2.2 / DNS: 10.0.2.3                           |
+|              Setting: --nat-localhostreachable1 on (Allows guest -> host UDP)           |
 +--------------------------------------------|--------------------------------------------+
-                                             | NAT Traffic / UDP Port 18888
+                                             | UDP Datagrams to 127.0.0.1:18888
                                              v
 +-----------------------------------------------------------------------------------------+
 |                                  WINDOWS HOST SYSTEM                                    |
@@ -48,21 +49,34 @@ Life OS solves one of the hardest problems in bare-metal hypervisor operating sy
 |  | (NAT forwarding guest HTTP/DNS)       |   | (`START_WIFI_HELPER.bat`)             |  |
 |  |                                       |   | - Queries Windows Native WLAN APIs    |  |
 |  |                                       |   | - Answers guest UDP queries on 18888  |  |
+|  |                                       |   | - Executes netsh wlan connect/profile |  |
 |  +---------------------------------------+   +---------------------------------------+  |
 +-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 2. The Hypervisor Limitation & Engineering Solution
+## 2. Hypervisor Constraints & Honest Root-Cause Engineering
 
-### The Technical Challenge
-In Oracle VirtualBox (and VMware/QEMU), hypervisors expose a **virtual Ethernet network adapter** (such as Intel PRO/1000 MT) to guest operating systems. They **do not** expose the physical Wi-Fi radio or IEEE 802.11 management frames directly to the guest unless an external dedicated USB Wi-Fi dongle is passed through.
+### The Core Problem
+VirtualBox and QEMU do not expose physical 802.11 Wi-Fi radios to guest virtual machines. Guests only see a virtual Ethernet controller (`82540EM`). In earlier builds of Life OS, the Network Manager reported `HostBridge_Waiting` instead of live networks.
 
-### The Honest Engineering Solution
-Rather than simulating fake or hardcoded Wi-Fi networks:
-1. **Virtual Ethernet Mode**: Life OS provides a genuine Intel 82540EM hardware driver and `smoltcp` TCP/IP stack to communicate across the VirtualBox NAT virtual switch.
-2. **Windows Host Wi-Fi Bridge**: Life OS connects via UDP to a companion host utility (`WiFiBridge.ps1`) running on the Windows host. This utility scans real physical Wi-Fi access points in the room using Windows `netsh wlan` / Native Wifi APIs and transmits the live SSIDs, signal strengths, and security ciphers to Life OS.
+### Root-Cause Investigation & Fixes
+1. **VirtualBox NAT Host Isolation**:
+   - *Issue:* By default, VirtualBox NAT security drops any guest packets sent to the host loopback `10.0.2.2`.
+   - *Fix:* Executed `VBoxManage modifyvm "Life OS" --nat-localhostreachable1 on` to allow the NAT engine to route guest UDP datagrams directly to `127.0.0.1:18888`.
+2. **e1000 PHY Auto-Negotiation Delay**:
+   - *Issue:* After software reset (`CTRL.RST`), the e1000 PHY takes ~20 ms to establish link. Checking `is_link_up()` immediately after reset returned `false`, causing `src/net/stack.rs` to abort network stack initialization.
+   - *Fix:* Added PHY stabilization delay and made `is_link_up()` read the live hardware `STATUS` register (`0x0008`, bit 1). Initialized `NET_STACK` whenever the NIC hardware driver is present.
+3. **e1000 RX Ring Index Desynchronization**:
+   - *Issue:* `receive()` used `let next = (self.rx_cur + 1) % NUM_DESC;` which checked descriptor 1 on the first packet, skipping descriptor 0 and desynchronizing the ring.
+   - *Fix:* Aligned descriptor processing to inspect `self.rx_cur`, update tail pointer `RDT = cur`, and advance `self.rx_cur = (cur + 1) % NUM_DESC`.
+4. **WLAN API Command Timeout**:
+   - *Issue:* `netsh wlan connect` requires up to 4.5 seconds to configure an XML profile, signal the physical Wi-Fi adapter, and verify interface state. The 3.5s timeout expired before the response arrived.
+   - *Fix:* Extended `send_host_wifi_command` timeout to `6500ms` in `src/net/stack.rs`.
+5. **Whitespace-Tolerant SSID Parsing**:
+   - *Issue:* `WiFiBridge.ps1` regex expected SSIDs anchored at the start of the line, dropping indented networks.
+   - *Fix:* Updated regex to `^\s*SSID\s+\d+\s*:\s*(.+)$` and added full extraction for Signal %, Authentication, Band (2.4 GHz / 5 GHz), Channel, and Connected state.
 
 ---
 
@@ -71,8 +85,8 @@ Rather than simulating fake or hardcoded Wi-Fi networks:
 Located in `src/drivers/e1000.rs`:
 
 ### 1. PCI Discovery & BAR Mapping
-- Scans PCI bus for Vendor ID `0x8086` and Device ID `0x100E`.
-- Reads `BAR0` to obtain the physical MMIO base address (typically `0xe8600000`).
+- Scans PCI configuration space for Vendor ID `0x8086` and Device ID `0x100E`.
+- Reads `BAR0` to obtain the physical MMIO base address (`0xe8600000`).
 - Translates the physical address to virtual address space using Higher-Half Direct Map (HHDM).
 
 ### 2. MAC Address Acquisition
@@ -82,7 +96,6 @@ The hardware MAC address is read from the Receive Address registers:
 
 ### 3. Circular DMA Descriptor Rings
 - **Receive (RX) Ring**:
-  - Allocated in physical frames.
   - 32 descriptors (`RxDesc`), each pointing to a dedicated 2048-byte physical receive buffer.
   - Registers: `RDBAL`/`RDBAH` (Base), `RDLEN` (Length = `32 * 16`), `RDH` (Head), `RDT` (Tail).
   - Packet reception verified via Descriptor Done (`DD`, bit 0) in the status byte.
@@ -99,27 +112,36 @@ Located in `src/net/smoltcp_adapter.rs` and `src/net/stack.rs`:
 
 ### Supported Protocols
 1. **Ethernet II**: Framing and hardware MAC header encapsulation.
-2. **ARP (Address Resolution Protocol)**: Dynamically resolves IPv4 addresses to Ethernet MAC addresses.
-3. **IPv4**: Packet routing, fragmentation handling, and TTL decrements.
-4. **ICMP**: Echo Request and Echo Reply handling for the `ping` terminal command.
-5. **UDP**: Datagram delivery for DNS queries and Wi-Fi host bridge communication.
-6. **TCP**: Three-way handshake (`SYN`, `SYN-ACK`, `ACK`), sequence number tracking, flow control, and HTTP client.
+2. **ARP**: Address Resolution Protocol dynamically mapping IPv4 to MAC addresses.
+3. **IPv4**: Packet routing and TTL tracking.
+4. **ICMP**: Echo Request/Reply handling for `ping`.
+5. **UDP**: Datagram transmission for DNS and host bridge communication.
+6. **TCP**: Three-way handshake (`SYN`, `SYN-ACK`, `ACK`), sequence tracking, flow control, and HTTP client.
 7. **DHCP**: Automatic network parameter negotiation on VirtualBox NAT (assigns `10.0.2.15`, gateway `10.0.2.2`, DNS `10.0.2.3`).
 
 ---
 
-## 5. Windows Host Wi-Fi Bridge Setup
+## 5. Host Bridge Protocol & Commands
 
-The host bridge files are located in the `host_bridge/` directory:
-- `host_bridge/WiFiBridge.ps1` — PowerShell UDP server querying `netsh wlan show networks mode=bssid`.
-- `host_bridge/START_WIFI_HELPER.bat` — 1-click batch launcher for Windows.
+The Windows helper (`host_bridge/WiFiBridge.ps1`) listens on UDP port `18888` on the host:
 
-### How to Run the Host Helper
-1. On the Windows host laptop, open file explorer and navigate to:
-   `C:\Users\USER\life-os\host_bridge\` (or project folder).
-2. Double-click `START_WIFI_HELPER.bat`.
-3. The helper starts listening on UDP port `18888`.
-4. In Life OS, open **Network Manager** or run `network` in the terminal:
-   - Life OS queries `10.0.2.2:18888` via UDP.
-   - The host responds with live nearby Wi-Fi SSIDs and signal strengths.
-   - Life OS displays the real physical Wi-Fi networks in the GUI!
+| Command | Direction | Description | Response Format |
+| :--- | :--- | :--- | :--- |
+| `SCAN` | Guest -> Host | Query physical Wi-Fi networks | `SSID\|SIGNAL%\|SECURITY\|BAND\|CHANNEL\|CONNECTED\n...` |
+| `STATUS` | Guest -> Host | Query current Wi-Fi interface state | `CONNECTED\|SSID\|SIGNAL\|SECURITY\|BAND\|CHANNEL` |
+| `CONNECT <ssid>\|<pwd>` | Guest -> Host | Connect to Wi-Fi with WPA2 key | `SUCCESS: Connected to <ssid>` or `FAILED: ...` |
+| `DISCONNECT` | Guest -> Host | Disconnect physical Wi-Fi | `SUCCESS: Disconnected` |
+
+### CLI Terminal Commands
+Users can manage Wi-Fi directly from the terminal shell:
+- `wifi scan` — Discovers physical Wi-Fi networks in the room.
+- `wifi status` — Prints live interface connection telemetry.
+- `wifi connect <SSID> [password]` — Initiates connection through host bridge.
+- `wifi disconnect` — Disconnects from current Wi-Fi network.
+
+### GUI Integration
+- Opening **Network & Wi-Fi Manager** displays the `Wi-Fi (Host Bridge)` tab.
+- Pressing `Scan Now` (or `s`/`r`) polls the host and populates the real-time table.
+- Selecting a network row highlights it in cyan and populates the connection box.
+- Passwords are typed into the masked input field with `Connect` / `Disconnect` buttons.
+- The taskbar system tray automatically updates with the real SSID name (e.g. `Vedav`) and signal bars!
